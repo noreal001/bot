@@ -339,46 +339,37 @@ async def process_voice_message(voice, chat_id):
                     logger.error(f"Failed to download file: {response.status_code}")
                     return None
                 
-                # Сохраняем временный файл
-                temp_file = f"temp_voice_{file_unique_id}.ogg"
-                with open(temp_file, "wb") as f:
-                    async for chunk in response.aiter_bytes():
-                        f.write(chunk)
+                # Читаем содержимое файла
+                file_content = await response.aread()
                 
-                # Распознаем речь
+                # Распознаем речь с использованием tempfile
                 try:
                     import speech_recognition as sr
                     from pydub import AudioSegment
+                    import tempfile
                     
-                    # Конвертируем ogg в wav
-                    audio = AudioSegment.from_ogg(temp_file)
-                    wav_file = f"temp_voice_{file_unique_id}.wav"
-                    audio.export(wav_file, format="wav")
-                    
-                    # Распознаем речь
                     recognizer = sr.Recognizer()
-                    with sr.AudioFile(wav_file) as source:
-                        audio_data = recognizer.record(source)
-                        text = recognizer.recognize_google(audio_data, language='ru-RU')
                     
-                    logger.info(f"Voice recognized: '{text}'")
+                    with tempfile.NamedTemporaryFile(suffix='.ogg') as temp_ogg, tempfile.NamedTemporaryFile(suffix='.wav') as temp_wav:
+                        # Записываем ogg файл
+                        temp_ogg.write(file_content)
+                        temp_ogg.flush()
+                        
+                        # Конвертируем ogg в wav
+                        audio = AudioSegment.from_file(temp_ogg.name)
+                        audio.export(temp_wav.name, format='wav')
+                        temp_wav.flush()
+                        
+                        # Распознаем речь
+                        with sr.AudioFile(temp_wav.name) as source:
+                            audio_data = recognizer.record(source)
+                        text_content = recognizer.recognize_google(audio_data, language='ru-RU')
                     
-                    # Удаляем временные файлы
-                    try:
-                        os.remove(temp_file)
-                        os.remove(wav_file)
-                    except:
-                        pass
-                    
-                    return text
+                    logger.info(f"Voice recognized: '{text_content}'")
+                    return text_content
                     
                 except Exception as speech_error:
                     logger.error(f"Speech recognition error: {speech_error}")
-                    # Удаляем временный файл
-                    try:
-                        os.remove(temp_file)
-                    except:
-                        pass
                     return "Не удалось распознать голосовое сообщение. Попробуйте еще раз или напишите текст."
                 
     except Exception as e:
