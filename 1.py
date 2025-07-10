@@ -343,17 +343,41 @@ async def process_voice_message(voice, chat_id):
                     async for chunk in response.aiter_bytes():
                         f.write(chunk)
                 
-                # Здесь можно добавить распознавание речи
-                # Пока возвращаем заглушку
-                logger.info(f"Voice message processed: duration={duration}s, file={temp_file}")
-                
-                # Удаляем временный файл
+                # Распознаем речь
                 try:
-                    os.remove(temp_file)
-                except:
-                    pass
-                
-                return "Голосовое сообщение получено! Пока распознавание речи в разработке."
+                    import speech_recognition as sr
+                    from pydub import AudioSegment
+                    
+                    # Конвертируем ogg в wav
+                    audio = AudioSegment.from_ogg(temp_file)
+                    wav_file = f"temp_voice_{file_unique_id}.wav"
+                    audio.export(wav_file, format="wav")
+                    
+                    # Распознаем речь
+                    recognizer = sr.Recognizer()
+                    with sr.AudioFile(wav_file) as source:
+                        audio_data = recognizer.record(source)
+                        text = recognizer.recognize_google(audio_data, language='ru-RU')
+                    
+                    logger.info(f"Voice recognized: '{text}'")
+                    
+                    # Удаляем временные файлы
+                    try:
+                        os.remove(temp_file)
+                        os.remove(wav_file)
+                    except:
+                        pass
+                    
+                    return text
+                    
+                except Exception as speech_error:
+                    logger.error(f"Speech recognition error: {speech_error}")
+                    # Удаляем временный файл
+                    try:
+                        os.remove(temp_file)
+                    except:
+                        pass
+                    return "Не удалось распознать голосовое сообщение. Попробуйте еще раз или напишите текст."
                 
     except Exception as e:
         logger.error(f"Voice processing error: {e}\n{traceback.format_exc()}")
@@ -367,8 +391,11 @@ async def send_typing_action(chat_id):
             "chat_id": chat_id,
             "action": "typing"
         }
-        async with httpx.AsyncClient() as client:
-            await client.post(url, json=payload)
+        timeout = httpx.Timeout(5.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code != 200:
+                logger.error(f"Failed to send typing action: {resp.status_code} - {resp.text}")
     except Exception as e:
         logger.error(f"Failed to send typing action: {e}")
 
@@ -453,8 +480,9 @@ async def telegram_webhook_impl(update: dict, request: Request):
                         # Если в режиме AI, обрабатываем голос как вопрос
                         await send_typing_action(chat_id)
                         voice_result = await process_voice_message(voice, chat_id)
-                        if voice_result and "распознавание речи в разработке" not in voice_result:
+                        if voice_result and "Не удалось распознать" not in voice_result and "Ошибка при обработке" not in voice_result:
                             # Если есть результат распознавания, отправляем в AI
+                            logger.info(f"[TG] Voice recognized as: '{voice_result}'")
                             ai_answer = await ask_deepseek(voice_result)
                             ai_answer = ai_answer.replace('*', '')
                             success = await telegram_send_message(chat_id, ai_answer)
@@ -463,13 +491,16 @@ async def telegram_webhook_impl(update: dict, request: Request):
                             else:
                                 logger.error(f"[TG] Failed to send AI answer to voice message for {chat_id}")
                         else:
-                            # Показываем сообщение о том, что распознавание в разработке
+                            # Показываем сообщение об ошибке распознавания
                             await telegram_send_message(chat_id, voice_result)
                         set_user_state(user_id, None)
                     else:
                         # В обычном режиме просто обрабатываем голос
                         voice_result = await process_voice_message(voice, chat_id)
-                        if voice_result:
+                        if voice_result and "Не удалось распознать" not in voice_result and "Ошибка при обработке" not in voice_result:
+                            # Если распознавание успешно, предлагаем использовать AI
+                            await telegram_send_message(chat_id, f"Распознано: '{voice_result}'\n\nХотите задать этот вопрос AI-Медвежонку? Нажмите кнопку 🧸 Ai-Медвежонок")
+                        else:
                             await telegram_send_message(chat_id, voice_result)
                     return {"ok": True}
                 
