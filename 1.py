@@ -234,7 +234,23 @@ async def telegram_webhook_impl(update: dict, request: Request):
                         'Я — ваш ароматный помощник от BAHUR.\n'
                         '🍓 Ищу ноты и 🧸 отвечаю на вопросы с любовью. ❤</b>'
                     )
-                    success = await telegram_send_message(chat_id, welcome)
+                    main_menu = {
+                        "inline_keyboard": [
+                            [{"text": "🧸 Ai-Медвежонок", "callback_data": "ai"}],
+                            [
+                                {"text": "🍦 Прайс", "url": "https://drive.google.com/file/d/1J70LlZwh6g7JOryDG2br-weQrYfv6zTc/view?usp=sharing"},
+                                {"text": "🍿 Магазин", "url": "https://www.bahur.store/m/"},
+                                {"text": "♾️ Вопросы", "url": "https://vk.com/@bahur_store-optovye-praisy-ot-bahur"}
+                            ],
+                            [
+                                {"text": "🎮 Чат", "url": "https://t.me/+VYDZEvbp1pce4KeT"},
+                                {"text": "💎 Статьи", "url": "https://vk.com/bahur_store?w=app6326142_-133936126%2523w%253Dapp6326142_-133936126"},
+                                {"text": "🏆 Отзывы", "url": "https://vk.com/@bahur_store"}
+                            ],
+                            [{"text": "🍓 Ноты", "callback_data": "instruction"}]
+                        ]
+                    }
+                    success = await telegram_send_message(chat_id, welcome, main_menu)
                     if success:
                         logger.info(f"[TG] Sent welcome to {chat_id}")
                     else:
