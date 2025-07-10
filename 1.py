@@ -25,6 +25,14 @@ DEEPSEEK_API = os.getenv('DEEPSEEK')
 # --- FastAPI app ---
 app = FastAPI()
 
+@app.on_event("startup")
+async def log_routes():
+    logger.info("=== ROUTES REGISTERED ===")
+    for route in app.routes:
+        logger.info(f"{route.path} [{','.join(route.methods or [])}]")
+    logger.info(f"WEBHOOK_PATH: {WEBHOOK_PATH}")
+    logger.info("=========================")
+
 # --- DeepSeek и данные Bahur ---
 def load_bahur_data():
     with open("bahur_data.txt", "r", encoding="utf-8") as f:
@@ -119,7 +127,9 @@ async def telegram_send_message(chat_id, text, reply_markup=None, parse_mode="HT
 
 # --- Telegram webhook endpoint ---
 @app.post(WEBHOOK_PATH)
-async def telegram_webhook(update: dict):
+async def telegram_webhook(update: dict, request: Request):
+    logger.info(f"[WEBHOOK] Called: {request.url} from {request.client.host}")
+    logger.info(f"[WEBHOOK] Body: {update}")
     try:
         if "message" in update:
             message = update["message"]
@@ -135,19 +145,23 @@ async def telegram_webhook(update: dict):
                     '🍓 Ищу ноты и 🧸 отвечаю на вопросы с любовью. ❤</b>'
                 )
                 await telegram_send_message(chat_id, welcome)
+                logger.info(f"[TG] Sent welcome to {chat_id}")
                 return {"ok": True}
             if state == 'awaiting_ai_question':
                 ai_answer = await ask_deepseek(text)
                 ai_answer = ai_answer.replace('*', '')
                 await telegram_send_message(chat_id, ai_answer)
+                logger.info(f"[TG] Sent ai_answer to {chat_id}")
                 return {"ok": True}
             if state == 'awaiting_note_search':
                 result = await search_note_api(text)
                 if result.get("status") == "success":
                     msg = f'✨ {result.get("brand")} {result.get("aroma")}\n\n{result.get("description")}'
                     await telegram_send_message(chat_id, msg)
+                    logger.info(f"[TG] Sent note result to {chat_id}")
                 else:
                     await telegram_send_message(chat_id, "Ничего не найдено по этой ноте 😢")
+                    logger.info(f"[TG] Sent not found to {chat_id}")
                 return {"ok": True}
             # Если нет состояния, предлагаем выбрать режим
             menu = {
@@ -157,6 +171,7 @@ async def telegram_webhook(update: dict):
                 ]
             }
             await telegram_send_message(chat_id, "Выберите режим: 🧸 Ai-Медвежонок или 🍓 Ноты", reply_markup=menu)
+            logger.info(f"[TG] Sent menu to {chat_id}")
             return {"ok": True}
         elif "callback_query" in update:
             callback = update["callback_query"]
@@ -164,13 +179,16 @@ async def telegram_webhook(update: dict):
             chat_id = callback["message"]["chat"]["id"]
             user_id = callback["from"]["id"]
             message_id = callback["message"]["message_id"]
+            logger.info(f"[TG] Callback: {data} from {user_id}")
             if data == "instruction":
                 user_states[user_id] = 'awaiting_note_search'
                 await telegram_send_message(chat_id, '🍉 Напиши любую ноту (например, апельсин, клубника) — я найду ароматы с этой нотой!')
+                logger.info(f"[TG] Set state awaiting_note_search for {user_id}")
                 return {"ok": True}
             elif data == "ai":
                 user_states[user_id] = 'awaiting_ai_question'
                 await telegram_send_message(chat_id, greet())
+                logger.info(f"[TG] Set state awaiting_ai_question for {user_id}")
                 return {"ok": True}
             elif data.startswith("repeatapi_"):
                 aroma_id = data.split('_', 1)[1]
@@ -182,11 +200,14 @@ async def telegram_webhook(update: dict):
                 if result.get("status") == "success":
                     msg = f'✨ {result.get("brand")} {result.get("aroma")}\n\n{result.get("description")}'
                     await telegram_send_message(chat_id, msg)
+                    logger.info(f"[TG] Sent repeatapi result to {chat_id}")
                 else:
                     await telegram_send_message(chat_id, "Ничего не найдено по этой ноте 😢")
+                    logger.info(f"[TG] Sent repeatapi not found to {chat_id}")
                 return {"ok": True}
             else:
                 await telegram_send_message(chat_id, "Callback обработан.")
+                logger.info(f"[TG] Sent generic callback to {chat_id}")
                 return {"ok": True}
         else:
             logger.warning("[TG] Unknown update type")
