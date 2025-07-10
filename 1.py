@@ -19,6 +19,7 @@ nest_asyncio.apply()
 TOKEN = os.getenv('TOKEN')
 DB_PATH = "aromas.db"
 BASE_WEBHOOK_URL = os.getenv('WEBHOOK_BASE_URL')
+WEBHOOK_PATH = os.getenv('WEBHOOK_PATH')
 DEEPSEEK_API = os.getenv('DEEPSEEK')
 
 # --- FastAPI app ---
