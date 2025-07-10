@@ -134,6 +134,11 @@ async def telegram_send_message(chat_id, text, reply_markup=None, parse_mode="HT
 print('=== [LOG] Объявляю эндпоинт webhook... ===')
 @app.post(WEBHOOK_PATH)
 async def telegram_webhook(update: dict, request: Request):
+    # Вся логика будет в telegram_webhook_impl ниже
+    return await telegram_webhook_impl(update, request)
+
+# --- Переносим вашу логику webhook сюда ---
+async def telegram_webhook_impl(update: dict, request: Request):
     print(f'[WEBHOOK] Called: {request.url} from {request.client.host}')
     print(f'[WEBHOOK] Body: {update}')
     logger.info(f"[WEBHOOK] Called: {request.url} from {request.client.host}")
