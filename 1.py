@@ -63,6 +63,35 @@ logger = logging.getLogger(__name__)
 # --- Состояния пользователей для AI (in-memory, not persistent) ---
 user_states = {}
 
+# --- Постоянное хранение состояний пользователей ---
+import json
+
+def load_user_states():
+    try:
+        with open("user_states.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+def save_user_states(states):
+    with open("user_states.json", "w", encoding="utf-8") as f:
+        json.dump(states, f, ensure_ascii=False, indent=2)
+
+def set_user_state(user_id, state):
+    global user_states
+    if state:
+        user_states[user_id] = state
+    else:
+        user_states.pop(user_id, None)
+    save_user_states(user_states)
+
+def get_user_state(user_id):
+    global user_states
+    return user_states.get(user_id)
+
+# Загружаем состояния при запуске
+user_states = load_user_states()
+
 # --- Модели для FastAPI ---
 class MessageModel(BaseModel):
     user_id: int
@@ -194,6 +223,91 @@ async def telegram_send_message(chat_id, text, reply_markup=None, parse_mode="HT
         logger.error(f"Telegram API unexpected error: {e}\n{traceback.format_exc()}")
         return False
 
+# --- Telegram editMessage ---
+async def telegram_edit_message(chat_id, message_id, text, reply_markup=None, parse_mode="HTML"):
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/editMessageText"
+        payload = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": parse_mode
+        }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        
+        timeout = httpx.Timeout(30.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code != 200:
+                logger.error(f"Telegram editMessage API error: {resp.status_code} - {resp.text}")
+                return False
+            return True
+            
+    except httpx.TimeoutException:
+        logger.error("Telegram editMessage API timeout")
+        return False
+    except httpx.RequestError as e:
+        logger.error(f"Telegram editMessage API request error: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Telegram editMessage API unexpected error: {e}\n{traceback.format_exc()}")
+        return False
+
+# --- Telegram answerCallbackQuery ---
+async def telegram_answer_callback_query(callback_query_id, text=None, show_alert=False):
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery"
+        payload = {
+            "callback_query_id": callback_query_id
+        }
+        if text:
+            payload["text"] = text
+        if show_alert:
+            payload["show_alert"] = show_alert
+        
+        timeout = httpx.Timeout(10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code != 200:
+                logger.error(f"Telegram answerCallbackQuery API error: {resp.status_code} - {resp.text}")
+                return False
+            return True
+            
+    except httpx.TimeoutException:
+        logger.error("Telegram answerCallbackQuery API timeout")
+        return False
+    except httpx.RequestError as e:
+        logger.error(f"Telegram answerCallbackQuery API request error: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Telegram answerCallbackQuery API unexpected error: {e}\n{traceback.format_exc()}")
+        return False
+
+# --- Поиск по ID аромата ---
+async def search_by_id_api(aroma_id):
+    try:
+        url = f"https://api.alexander-dev.ru/bahur/search/?id={aroma_id}"
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    logger.error(f"Search by ID API error: {resp.status} - {await resp.text()}")
+                    return {"status": "error", "message": "Ошибка API"}
+                
+                result = await resp.json()
+                return result
+                
+    except asyncio.TimeoutError:
+        logger.error("Search by ID API timeout")
+        return {"status": "error", "message": "Таймаут запроса"}
+    except aiohttp.ClientError as e:
+        logger.error(f"Search by ID API client error: {e}")
+        return {"status": "error", "message": "Ошибка сети"}
+    except Exception as e:
+        logger.error(f"Search by ID API unexpected error: {e}\n{traceback.format_exc()}")
+        return {"status": "error", "message": "Неожиданная ошибка"}
+
 # --- Telegram webhook endpoint ---
 print('=== [LOG] Объявляю эндпоинт webhook... ===')
 @app.post("/webhook/ai-bear-123456")
@@ -224,7 +338,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
             chat_id = message["chat"]["id"]
             user_id = message["from"]["id"]
             text = message.get("text", "").strip()
-            state = user_states.get(user_id)
+            state = get_user_state(user_id)
             logger.info(f"[TG] user_id: {user_id}, text: {text}, state: {state}")
             
             try:
@@ -265,13 +379,23 @@ async def telegram_webhook_impl(update: dict, request: Request):
                         logger.info(f"[TG] Sent ai_answer to {chat_id}")
                     else:
                         logger.error(f"[TG] Failed to send ai_answer to {chat_id}")
+                    set_user_state(user_id, None)  # Сбрасываем состояние
                     return {"ok": True}
                 if state == 'awaiting_note_search':
                     logger.info(f"[TG] Processing note search for user {user_id}")
                     result = await search_note_api(text)
                     if result.get("status") == "success":
                         msg = f'✨ {result.get("brand")} {result.get("aroma")}\n\n{result.get("description")}'
-                        success = await telegram_send_message(chat_id, msg)
+                        # Добавляем кнопки "Подробнее" и "Повторить"
+                        reply_markup = {
+                            "inline_keyboard": [
+                                [
+                                    {"text": "🚀 Подробнее", "url": result.get("url", "")},
+                                    {"text": "♾️ Повторить", "callback_data": f"repeatapi_{result.get('ID', '')}"}
+                                ]
+                            ]
+                        }
+                        success = await telegram_send_message(chat_id, msg, reply_markup)
                         if success:
                             logger.info(f"[TG] Sent note result to {chat_id}")
                         else:
@@ -282,6 +406,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                             logger.info(f"[TG] Sent not found to {chat_id}")
                         else:
                             logger.error(f"[TG] Failed to send not found to {chat_id}")
+                    set_user_state(user_id, None)  # Сбрасываем состояние
                     return {"ok": True}
                 # Если нет состояния, предлагаем выбрать режим
                 menu = {
@@ -295,6 +420,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     logger.info(f"[TG] Sent menu to {chat_id}")
                 else:
                     logger.error(f"[TG] Failed to send menu to {chat_id}")
+                set_user_state(user_id, None)  # Сбрасываем состояние
                 return {"ok": True}
             except Exception as e:
                 logger.error(f"[TG] Exception in message processing: {e}\n{traceback.format_exc()}")
@@ -311,45 +437,45 @@ async def telegram_webhook_impl(update: dict, request: Request):
             chat_id = callback["message"]["chat"]["id"]
             user_id = callback["from"]["id"]
             message_id = callback["message"]["message_id"]
+            callback_id = callback["id"]
             logger.info(f"[TG] Callback: {data} from {user_id}")
             
             try:
                 if data == "instruction":
-                    user_states[user_id] = 'awaiting_note_search'
-                    success = await telegram_send_message(chat_id, '🍉 Напиши любую ноту (например, апельсин, клубника) — я найду ароматы с этой нотой!')
+                    set_user_state(user_id, 'awaiting_note_search')
+                    success = await telegram_edit_message(chat_id, message_id, '🍉 Напиши любую ноту (например, апельсин, клубника) — я найду ароматы с этой нотой!')
                     if success:
                         logger.info(f"[TG] Set state awaiting_note_search for {user_id}")
                     else:
-                        logger.error(f"[TG] Failed to send instruction message to {chat_id}")
+                        logger.error(f"[TG] Failed to edit instruction message for {chat_id}")
+                    await telegram_answer_callback_query(callback_id)
                     return {"ok": True}
                 elif data == "ai":
-                    user_states[user_id] = 'awaiting_ai_question'
-                    success = await telegram_send_message(chat_id, greet())
+                    set_user_state(user_id, 'awaiting_ai_question')
+                    success = await telegram_edit_message(chat_id, message_id, greet())
                     if success:
                         logger.info(f"[TG] Set state awaiting_ai_question for {user_id}")
                     else:
-                        logger.error(f"[TG] Failed to send ai greeting to {chat_id}")
+                        logger.error(f"[TG] Failed to edit ai greeting for {chat_id}")
+                    await telegram_answer_callback_query(callback_id)
                     return {"ok": True}
                 elif data.startswith("repeatapi_"):
                     aroma_id = data.split('_', 1)[1]
-                    url = f"https://api.alexander-dev.ru/bahur/search/?id={aroma_id}"
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(url, timeout=10) as response:
-                            response.raise_for_status()
-                            result = await response.json()
+                    result = await search_by_id_api(aroma_id)
                     if result.get("status") == "success":
                         msg = f'✨ {result.get("brand")} {result.get("aroma")}\n\n{result.get("description")}'
-                        success = await telegram_send_message(chat_id, msg)
+                        success = await telegram_edit_message(chat_id, message_id, msg)
                         if success:
-                            logger.info(f"[TG] Sent repeatapi result to {chat_id}")
+                            logger.info(f"[TG] Edited repeatapi result for {chat_id}")
                         else:
-                            logger.error(f"[TG] Failed to send repeatapi result to {chat_id}")
+                            logger.error(f"[TG] Failed to edit repeatapi result for {chat_id}")
                     else:
-                        success = await telegram_send_message(chat_id, "Ничего не найдено по этой ноте 😢")
+                        success = await telegram_edit_message(chat_id, message_id, "Ничего не найдено по этой ноте 😢")
                         if success:
-                            logger.info(f"[TG] Sent repeatapi not found to {chat_id}")
+                            logger.info(f"[TG] Edited repeatapi not found for {chat_id}")
                         else:
-                            logger.error(f"[TG] Failed to send repeatapi not found to {chat_id}")
+                            logger.error(f"[TG] Failed to edit repeatapi not found for {chat_id}")
+                    await telegram_answer_callback_query(callback_id)
                     return {"ok": True}
                 else:
                     success = await telegram_send_message(chat_id, "Callback обработан.")
@@ -415,7 +541,7 @@ async def healthcheck():
 async def handle_message(msg: MessageModel):
     user_id = msg.user_id
     text = msg.text.strip()
-    state = user_states.get(user_id)
+    state = get_user_state(user_id)
     logger.info(f"[SUPERLOG] user_id: {user_id}, text: {text}, state: {state}")
     try:
         if state == 'awaiting_ai_question':
@@ -449,19 +575,15 @@ async def handle_callback(cb: CallbackModel):
         if data != 'ai' and user_id in user_states:
             user_states.pop(user_id, None)
         if data == 'instruction':
-            user_states[user_id] = 'awaiting_note_search'
+            set_user_state(user_id, 'awaiting_note_search')
             return JSONResponse({"text": '🍉 Напиши любую ноту (например, апельсин, клубника) — я найду ароматы с этой нотой!'} )
         elif data == 'ai':
-            user_states[user_id] = 'awaiting_ai_question'
+            set_user_state(user_id, 'awaiting_ai_question')
             result = greet()
             return JSONResponse({"text": result})
         elif data.startswith('repeatapi_'):
             aroma_id = data.split('_', 1)[1]
-            url = f"https://api.alexander-dev.ru/bahur/search/?id={aroma_id}"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as response:
-                    response.raise_for_status()
-                    result = await response.json()
+            result = await search_by_id_api(aroma_id)
             if result.get("status") == "success":
                 return JSONResponse({
                     "brand": result.get("brand"),
