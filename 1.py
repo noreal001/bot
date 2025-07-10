@@ -19,7 +19,7 @@ nest_asyncio.apply()
 TOKEN = os.getenv('TOKEN')
 DB_PATH = "aromas.db"
 BASE_WEBHOOK_URL = os.getenv('WEBHOOK_BASE_URL')
-WEBHOOK_PATH = os.getenv('WEBHOOK_PATH')
+WEBHOOK_PATH = "/webhook/ai-bear-123456"
 DEEPSEEK_API = os.getenv('DEEPSEEK')
 
 # --- FastAPI app ---
@@ -106,7 +106,7 @@ async def search_note_api(note):
 
 # --- Telegram sendMessage ---
 async def telegram_send_message(chat_id, text, reply_markup=None, parse_mode="HTML"):
-    url = f"{TELEGRAM_API_URL}/sendMessage"
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,
@@ -197,7 +197,7 @@ async def telegram_webhook(update: dict):
 
 # --- Установка Telegram webhook ---
 async def set_telegram_webhook(base_url: str):
-    url = f"{TELEGRAM_API_URL}/setWebhook"
+    url = f"https://api.telegram.org/bot{TOKEN}/setWebhook"
     webhook_url = f"{base_url}{WEBHOOK_PATH}"
     async with httpx.AsyncClient() as client:
         resp = await client.post(url, data={"url": webhook_url})
