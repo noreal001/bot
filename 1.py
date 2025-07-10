@@ -12,6 +12,8 @@ from pydantic import BaseModel
 import aiohttp
 import asyncio
 import httpx
+import sys
+import uvicorn
 
 print('=== [LOG] 1.py импортирован ===')
 nest_asyncio.apply()
@@ -336,3 +338,7 @@ async def cmd_start(msg: MessageModel):
     return JSONResponse({"text": text, "parse_mode": "HTML"})
 
 # --- Для запуска: uvicorn 1:app --reload ---
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    print(f"[INFO] Starting uvicorn on 0.0.0.0:{port}")
+    uvicorn.run("1:app", host="0.0.0.0", port=port, reload=True)
