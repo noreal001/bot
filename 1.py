@@ -111,7 +111,8 @@ def greet():
     "Алло-алло! 📞 Ты дозвонился до самого продающего медведя в сети. Вопросы — в студию!",
     "Хей-хей! 🎯 Готов к диалогу, как пчела к мёду. Запускай свой запрос!",
     "Тыдыщь! 🎩✨ Ai-Медвежонок-волшебник приветствует тебя. Какой вопрос спрятан у тебя в рукаве?",
-    "Привет, землянин! 👽🐻 (Шучу, я просто AI). Давай общаться — спрашивай что угодно!"
+    "Привет, землянин! 👽🐻 (Шучу, я просто AI). Давай общаться — спрашивай что угодно!",
+    "Привет, мой ароматный друг! 🐻✨ Я тут, как всегда, на волне парфюмерного вдохновения — помогаю клиентам выбирать самые топовые масла и флаконы, чтобы их жизнь пахла успехом! А ты как? Готов окунуться в мир божественных ароматов или уже решил, что хочешь заказать? 😏\n\nЕсли хочешь узнать что-то конкретное — спрашивай, а если просто зашел поболтать, то давай лучше о духах! Кстати, у нас есть крутые новинки, которые сведут с ума даже самых искушенных ценителей. 🔥\n\nКакой аромат тебя манит сегодня? Может, <a href='https://www.bahur.store/m/'>заглянешь в магазин</a> и выберешь что-то по-настоящему волшебное?"
     ])
 
 async def ask_deepseek(question):
@@ -135,6 +136,7 @@ async def ask_deepseek(question):
                         "Когда вставляешь ссылку, используй HTML-формат: <a href='ССЫЛКА'>ТЕКСТ</a>. Не используй markdown."
                         "Но если он пишет несколько слов, которые похожи на ноты, предложи ему нажать на кнопку 🍓 Ноты в меню"
                         "Не пиши про номера ароматов в прайсе"
+                        "ВАЖНО: Если в ответе есть ссылки, используй формат <a href='ССЫЛКА'>ТЕКСТ</a> - они будут автоматически преобразованы в кнопки"
                     )
                 },
                 {
@@ -438,6 +440,31 @@ def is_likely_note(text):
     
     return False
 
+# --- Обработка ссылок в тексте ---
+import re
+
+def extract_links_from_text(text):
+    """Извлекает ссылки из HTML-текста и создает кнопки"""
+    # Ищем ссылки в формате <a href='URL'>ТЕКСТ</a>
+    link_pattern = r"<a\s+href=['\"]([^'\"]+)['\"][^>]*>([^<]+)</a>"
+    links = re.findall(link_pattern, text)
+    
+    if not links:
+        return None
+    
+    # Создаем кнопки для каждой ссылки
+    buttons = []
+    for url, text in links:
+        buttons.append([{"text": text, "url": url}])
+    
+    return {"inline_keyboard": buttons}
+
+def remove_html_links(text):
+    """Удаляет HTML-ссылки из текста, оставляя только текст"""
+    # Удаляем ссылки в формате <a href='URL'>ТЕКСТ</a>, оставляя только ТЕКСТ
+    link_pattern = r"<a\s+href=['\"][^'\"]+['\"][^>]*>([^<]+)</a>"
+    return re.sub(link_pattern, r"\1", text)
+
 # --- Telegram webhook endpoint ---
 print('=== [LOG] Объявляю эндпоинт webhook... ===')
 @app.post("/webhook/ai-bear-123456")
@@ -483,9 +510,16 @@ async def telegram_webhook_impl(update: dict, request: Request):
                         if voice_result and "Не удалось распознать" not in voice_result and "Ошибка при обработке" not in voice_result:
                             # Если есть результат распознавания, отправляем в AI
                             logger.info(f"[TG] Voice recognized as: '{voice_result}'")
+                            # Отправляем индикатор "печатает"
+                            await send_typing_action(chat_id)
                             ai_answer = await ask_deepseek(voice_result)
                             ai_answer = ai_answer.replace('*', '')
-                            success = await telegram_send_message(chat_id, ai_answer)
+                            
+                            # Извлекаем ссылки из ответа и создаем кнопки
+                            buttons = extract_links_from_text(ai_answer)
+                            ai_answer_clean = remove_html_links(ai_answer)
+                            
+                            success = await telegram_send_message(chat_id, ai_answer_clean, buttons if buttons else None)
                             if success:
                                 logger.info(f"[TG] Sent AI answer to voice message for {chat_id}")
                             else:
@@ -493,7 +527,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                         else:
                             # Показываем сообщение об ошибке распознавания
                             await telegram_send_message(chat_id, voice_result)
-                        set_user_state(user_id, None)
+                        # НЕ сбрасываем состояние - остаемся в режиме AI
                     else:
                         # В обычном режиме просто обрабатываем голос
                         voice_result = await process_voice_message(voice, chat_id)
@@ -508,7 +542,8 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     welcome = (
                         '<b>Здравствуйте!\n\n'
                         'Я — ваш ароматный помощник от BAHUR.\n'
-                        '🍓 Ищу ноты и 🧸 отвечаю на вопросы с любовью. ❤</b>'
+                        '🍓 Ищу ноты и 🧸 отвечаю на вопросы с любовью. ❤\n\n'
+                        '💡 <i>Используйте /menu для возврата в главное меню</i></b>'
                     )
                     main_menu = {
                         "inline_keyboard": [
@@ -531,6 +566,38 @@ async def telegram_webhook_impl(update: dict, request: Request):
                         logger.info(f"[TG] Sent welcome to {chat_id}")
                     else:
                         logger.error(f"[TG] Failed to send welcome to {chat_id}")
+                    set_user_state(user_id, None)  # Сбрасываем состояние при /start
+                    return {"ok": True}
+                elif text == "/menu":
+                    # Команда для выхода из режима AI и возврата в главное меню
+                    welcome = (
+                        '<b>Здравствуйте!\n\n'
+                        'Я — ваш ароматный помощник от BAHUR.\n'
+                        '🍓 Ищу ноты и 🧸 отвечаю на вопросы с любовью. ❤\n\n'
+                        '💡 <i>Используйте /menu для возврата в главное меню</i></b>'
+                    )
+                    main_menu = {
+                        "inline_keyboard": [
+                            [{"text": "🧸 Ai-Медвежонок", "callback_data": "ai"}],
+                            [
+                                {"text": "🍦 Прайс", "url": "https://drive.google.com/file/d/1J70LlZwh6g7JOryDG2br-weQrYfv6zTc/view?usp=sharing"},
+                                {"text": "🍿 Магазин", "url": "https://www.bahur.store/m/"},
+                                {"text": "♾️ Вопросы", "url": "https://vk.com/@bahur_store-optovye-praisy-ot-bahur"}
+                            ],
+                            [
+                                {"text": "🎮 Чат", "url": "https://t.me/+VYDZEvbp1pce4KeT"},
+                                {"text": "💎 Статьи", "url": "https://vk.com/bahur_store?w=app6326142_-133936126%2523w%253Dapp6326142_-133936126"},
+                                {"text": "🏆 Отзывы", "url": "https://vk.com/@bahur_store"}
+                            ],
+                            [{"text": "🍓 Ноты", "callback_data": "instruction"}]
+                        ]
+                    }
+                    success = await telegram_send_message(chat_id, welcome, main_menu)
+                    if success:
+                        logger.info(f"[TG] Sent menu to {chat_id}")
+                    else:
+                        logger.error(f"[TG] Failed to send menu to {chat_id}")
+                    set_user_state(user_id, None)  # Сбрасываем состояние
                     return {"ok": True}
                 if state == 'awaiting_ai_question':
                     logger.info(f"[TG] Processing AI question for user {user_id}")
@@ -538,12 +605,17 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     await send_typing_action(chat_id)
                     ai_answer = await ask_deepseek(text)
                     ai_answer = ai_answer.replace('*', '')
-                    success = await telegram_send_message(chat_id, ai_answer)
+                    
+                    # Извлекаем ссылки из ответа и создаем кнопки
+                    buttons = extract_links_from_text(ai_answer)
+                    ai_answer_clean = remove_html_links(ai_answer)
+                    
+                    success = await telegram_send_message(chat_id, ai_answer_clean, buttons if buttons else None)
                     if success:
                         logger.info(f"[TG] Sent ai_answer to {chat_id}")
                     else:
                         logger.error(f"[TG] Failed to send ai_answer to {chat_id}")
-                    set_user_state(user_id, None)  # Сбрасываем состояние
+                    # НЕ сбрасываем состояние - остаемся в режиме AI
                     return {"ok": True}
                 if state == 'awaiting_note_search':
                     logger.info(f"[TG] Processing note search for user {user_id}")
@@ -647,7 +719,13 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     return {"ok": True}
                 elif data == "ai":
                     set_user_state(user_id, 'awaiting_ai_question')
-                    success = await telegram_edit_message(chat_id, message_id, greet())
+                    ai_greeting = greet()
+                    
+                    # Извлекаем ссылки из приветствия и создаем кнопки
+                    buttons = extract_links_from_text(ai_greeting)
+                    ai_greeting_clean = remove_html_links(ai_greeting)
+                    
+                    success = await telegram_edit_message(chat_id, message_id, ai_greeting_clean, buttons if buttons else None)
                     if success:
                         logger.info(f"[TG] Set state awaiting_ai_question for {user_id}")
                     else:
@@ -749,6 +827,7 @@ async def handle_message(msg: MessageModel):
     logger.info(f"[SUPERLOG] user_id: {user_id}, text: {text}, state: {state}")
     try:
         if state == 'awaiting_ai_question':
+            # Отправляем индикатор "печатает" (но здесь нет chat_id, поэтому пропускаем)
             ai_answer = await ask_deepseek(text)
             ai_answer = ai_answer.replace('*', '')
             return JSONResponse({"answer": ai_answer, "parse_mode": "HTML"})
