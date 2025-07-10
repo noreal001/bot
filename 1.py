@@ -13,6 +13,7 @@ import aiohttp
 import asyncio
 import httpx
 
+print('=== [LOG] 1.py импортирован ===')
 nest_asyncio.apply()
 
 # --- Конфигурация ---
@@ -23,7 +24,11 @@ WEBHOOK_PATH = "/webhook/ai-bear-123456"
 DEEPSEEK_API = os.getenv('DEEPSEEK')
 
 # --- FastAPI app ---
+print('=== [LOG] FastAPI app создаётся ===')
 app = FastAPI()
+print('=== [LOG] FastAPI app создан ===')
+
+print(f'=== [LOG] WEBHOOK_PATH: {WEBHOOK_PATH} ===')
 
 @app.on_event("startup")
 async def log_routes():
@@ -126,12 +131,16 @@ async def telegram_send_message(chat_id, text, reply_markup=None, parse_mode="HT
         await client.post(url, json=payload)
 
 # --- Telegram webhook endpoint ---
+print('=== [LOG] Объявляю эндпоинт webhook... ===')
 @app.post(WEBHOOK_PATH)
 async def telegram_webhook(update: dict, request: Request):
+    print(f'[WEBHOOK] Called: {request.url} from {request.client.host}')
+    print(f'[WEBHOOK] Body: {update}')
     logger.info(f"[WEBHOOK] Called: {request.url} from {request.client.host}")
     logger.info(f"[WEBHOOK] Body: {update}")
     try:
         if "message" in update:
+            print('[WEBHOOK] message detected')
             message = update["message"]
             chat_id = message["chat"]["id"]
             user_id = message["from"]["id"]
@@ -174,6 +183,7 @@ async def telegram_webhook(update: dict, request: Request):
             logger.info(f"[TG] Sent menu to {chat_id}")
             return {"ok": True}
         elif "callback_query" in update:
+            print('[WEBHOOK] callback_query detected')
             callback = update["callback_query"]
             data = callback["data"]
             chat_id = callback["message"]["chat"]["id"]
@@ -210,11 +220,14 @@ async def telegram_webhook(update: dict, request: Request):
                 logger.info(f"[TG] Sent generic callback to {chat_id}")
                 return {"ok": True}
         else:
+            print('[WEBHOOK] unknown update type')
             logger.warning("[TG] Unknown update type")
             return {"ok": False}
     except Exception as e:
+        print(f'[WEBHOOK] Exception: {e}')
         logger.error(f"[TG] Exception in webhook: {e}\n{traceback.format_exc()}")
         return {"ok": False, "error": str(e)}
+print('=== [LOG] Эндпоинт webhook объявлен ===')
 
 # --- Установка Telegram webhook ---
 async def set_telegram_webhook(base_url: str):
