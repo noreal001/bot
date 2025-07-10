@@ -134,8 +134,9 @@ async def telegram_send_message(chat_id, text, reply_markup=None, parse_mode="HT
 
 # --- Telegram webhook endpoint ---
 print('=== [LOG] Объявляю эндпоинт webhook... ===')
-@app.post(WEBHOOK_PATH)
+@app.post("/webhook/ai-bear-123456")
 async def telegram_webhook(update: dict, request: Request):
+    logger.info(f"telegram_webhook works")
     # Вся логика будет в telegram_webhook_impl ниже
     return await telegram_webhook_impl(update, request)
 
