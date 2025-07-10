@@ -348,6 +348,13 @@ async def process_voice_message(voice, chat_id):
                     from pydub import AudioSegment
                     import tempfile
                     
+                    # Проверяем доступность необходимых модулей
+                    try:
+                        import aifc
+                    except ImportError:
+                        logger.error("Module 'aifc' not available, trying alternative approach")
+                        return "Распознавание речи временно недоступно. Пожалуйста, напишите ваш вопрос текстом."
+                    
                     recognizer = sr.Recognizer()
                     
                     with tempfile.NamedTemporaryFile(suffix='.ogg') as temp_ogg, tempfile.NamedTemporaryFile(suffix='.wav') as temp_wav:
@@ -356,24 +363,72 @@ async def process_voice_message(voice, chat_id):
                         temp_ogg.flush()
                         
                         # Конвертируем ogg в wav
-                        audio = AudioSegment.from_file(temp_ogg.name)
-                        audio.export(temp_wav.name, format='wav')
-                        temp_wav.flush()
+                        try:
+                            audio = AudioSegment.from_file(temp_ogg.name)
+                            audio.export(temp_wav.name, format='wav')
+                            temp_wav.flush()
+                        except Exception as audio_error:
+                            logger.error(f"Audio conversion error: {audio_error}")
+                            return "Ошибка при обработке аудио файла. Попробуйте еще раз или напишите текст."
                         
                         # Распознаем речь
-                        with sr.AudioFile(temp_wav.name) as source:
-                            audio_data = recognizer.record(source)
-                        text_content = recognizer.recognize_google(audio_data, language='ru-RU')
+                        try:
+                            with sr.AudioFile(temp_wav.name) as source:
+                                audio_data = recognizer.record(source)
+                            text_content = recognizer.recognize_google(audio_data, language='ru-RU')
+                            
+                            logger.info(f"Voice recognized: '{text_content}'")
+                            return text_content
+                            
+                        except sr.UnknownValueError:
+                            logger.error("Speech recognition could not understand audio")
+                            return "Не удалось разобрать речь. Попробуйте говорить четче или напишите текст."
+                        except sr.RequestError as e:
+                            logger.error(f"Speech recognition service error: {e}")
+                            return "Ошибка сервиса распознавания речи. Попробуйте еще раз или напишите текст."
                     
-                    logger.info(f"Voice recognized: '{text_content}'")
-                    return text_content
-                    
+                except ImportError as import_error:
+                    logger.error(f"Import error in speech recognition: {import_error}")
+                    # Пробуем альтернативный метод
+                    return await process_voice_message_simple(voice, chat_id)
                 except Exception as speech_error:
                     logger.error(f"Speech recognition error: {speech_error}")
                     return "Не удалось распознать голосовое сообщение. Попробуйте еще раз или напишите текст."
                 
     except Exception as e:
         logger.error(f"Voice processing error: {e}\n{traceback.format_exc()}")
+        return "Ошибка при обработке голосового сообщения."
+
+# --- Альтернативная обработка голосовых сообщений (без aifc) ---
+async def process_voice_message_simple(voice, chat_id):
+    """Упрощенная обработка голосовых сообщений без сложных зависимостей"""
+    try:
+        # Получаем информацию о файле
+        file_id = voice["file_id"]
+        duration = voice.get("duration", 0)
+        
+        # Если голосовое сообщение слишком короткое
+        if duration < 1:
+            return "Голосовое сообщение слишком короткое. Попробуйте записать более длинное сообщение."
+        
+        # Получаем файл
+        file_url = f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(file_url)
+            if resp.status_code != 200:
+                logger.error(f"Failed to get file info: {resp.status_code}")
+                return None
+            
+            file_info = resp.json()
+            if not file_info.get("ok"):
+                logger.error(f"File info error: {file_info}")
+                return None
+            
+            # Просто возвращаем информацию о голосовом сообщении
+            return f"Получено голосовое сообщение длительностью {duration} секунд. Для распознавания речи напишите ваш вопрос текстом."
+                
+    except Exception as e:
+        logger.error(f"Simple voice processing error: {e}\n{traceback.format_exc()}")
         return "Ошибка при обработке голосового сообщения."
 
 # --- Функция "печатает" ---
