@@ -20,7 +20,6 @@ nest_asyncio.apply()
 
 # --- Конфигурация ---
 TOKEN = os.getenv('TOKEN')
-DB_PATH = "aromas.db"
 BASE_WEBHOOK_URL = os.getenv('WEBHOOK_BASE_URL')
 WEBHOOK_PATH = "/webhook/ai-bear-123456"
 DEEPSEEK_API = os.getenv('DEEPSEEK')
@@ -308,6 +307,110 @@ async def search_by_id_api(aroma_id):
         logger.error(f"Search by ID API unexpected error: {e}\n{traceback.format_exc()}")
         return {"status": "error", "message": "Неожиданная ошибка"}
 
+# --- Обработка голосовых сообщений ---
+async def process_voice_message(voice, chat_id):
+    try:
+        # Получаем информацию о файле
+        file_id = voice["file_id"]
+        file_unique_id = voice["file_unique_id"]
+        duration = voice.get("duration", 0)
+        
+        # Получаем файл
+        file_url = f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(file_url)
+            if resp.status_code != 200:
+                logger.error(f"Failed to get file info: {resp.status_code}")
+                return None
+            
+            file_info = resp.json()
+            if not file_info.get("ok"):
+                logger.error(f"File info error: {file_info}")
+                return None
+            
+            file_path = file_info["result"]["file_path"]
+            file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+            
+            # Скачиваем файл
+            async with client.stream("GET", file_url) as response:
+                if response.status_code != 200:
+                    logger.error(f"Failed to download file: {response.status_code}")
+                    return None
+                
+                # Сохраняем временный файл
+                temp_file = f"temp_voice_{file_unique_id}.ogg"
+                with open(temp_file, "wb") as f:
+                    async for chunk in response.aiter_bytes():
+                        f.write(chunk)
+                
+                # Здесь можно добавить распознавание речи
+                # Пока возвращаем заглушку
+                logger.info(f"Voice message processed: duration={duration}s, file={temp_file}")
+                
+                # Удаляем временный файл
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
+                
+                return "Голосовое сообщение получено! Пока распознавание речи в разработке."
+                
+    except Exception as e:
+        logger.error(f"Voice processing error: {e}\n{traceback.format_exc()}")
+        return "Ошибка при обработке голосового сообщения."
+
+# --- Функция "печатает" ---
+async def send_typing_action(chat_id):
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/sendChatAction"
+        payload = {
+            "chat_id": chat_id,
+            "action": "typing"
+        }
+        async with httpx.AsyncClient() as client:
+            await client.post(url, json=payload)
+    except Exception as e:
+        logger.error(f"Failed to send typing action: {e}")
+
+# --- Умное распознавание нот ---
+def is_likely_note(text):
+    """Определяет, похож ли текст на название ноты"""
+    if not text:
+        return False
+    
+    # Список популярных нот
+    common_notes = [
+        'ваниль', 'лаванда', 'роза', 'жасмин', 'сандал', 'мускус', 'амбра', 'пачули',
+        'бергамот', 'лимон', 'апельсин', 'мандарин', 'грейпфрут', 'лайм',
+        'клубника', 'малина', 'черника', 'вишня', 'персик', 'абрикос', 'яблоко',
+        'груша', 'ананас', 'манго', 'банан', 'кокос', 'карамель', 'шоколад',
+        'кофе', 'чай', 'мята', 'базилик', 'розмарин', 'тимьян', 'орегано',
+        'корица', 'кардамон', 'имбирь', 'куркума', 'перец', 'гвоздика',
+        'кедр', 'сосна', 'ель', 'дуб', 'береза', 'иланг-иланг', 'нероли',
+        'ирис', 'фиалка', 'ландыш', 'сирень', 'жасмин', 'гардения',
+        'морская соль', 'морской бриз', 'дождь', 'снег', 'земля', 'мох',
+        'дым', 'кожа', 'табак', 'виски', 'коньяк', 'ром', 'вино',
+        'мед', 'сливки', 'молоко', 'йогурт', 'сыр', 'масло'
+    ]
+    
+    text_lower = text.lower().strip()
+    
+    # Проверяем точное совпадение
+    if text_lower in common_notes:
+        return True
+    
+    # Проверяем частичное совпадение
+    for note in common_notes:
+        if note in text_lower or text_lower in note:
+            return True
+    
+    # Проверяем по длине и характеру (короткие слова часто бывают нотами)
+    if len(text_lower) <= 15 and not any(char.isdigit() for char in text_lower):
+        # Если текст короткий и не содержит цифр, возможно это нота
+        return True
+    
+    return False
+
 # --- Telegram webhook endpoint ---
 print('=== [LOG] Объявляю эндпоинт webhook... ===')
 @app.post("/webhook/ai-bear-123456")
@@ -338,10 +441,38 @@ async def telegram_webhook_impl(update: dict, request: Request):
             chat_id = message["chat"]["id"]
             user_id = message["from"]["id"]
             text = message.get("text", "").strip()
+            voice = message.get("voice")
             state = get_user_state(user_id)
             logger.info(f"[TG] user_id: {user_id}, text: {text}, state: {state}")
             
             try:
+                # Обработка голосовых сообщений
+                if voice:
+                    logger.info(f"[TG] Voice message received from {user_id}")
+                    if state == 'awaiting_ai_question':
+                        # Если в режиме AI, обрабатываем голос как вопрос
+                        await send_typing_action(chat_id)
+                        voice_result = await process_voice_message(voice, chat_id)
+                        if voice_result and "распознавание речи в разработке" not in voice_result:
+                            # Если есть результат распознавания, отправляем в AI
+                            ai_answer = await ask_deepseek(voice_result)
+                            ai_answer = ai_answer.replace('*', '')
+                            success = await telegram_send_message(chat_id, ai_answer)
+                            if success:
+                                logger.info(f"[TG] Sent AI answer to voice message for {chat_id}")
+                            else:
+                                logger.error(f"[TG] Failed to send AI answer to voice message for {chat_id}")
+                        else:
+                            # Показываем сообщение о том, что распознавание в разработке
+                            await telegram_send_message(chat_id, voice_result)
+                        set_user_state(user_id, None)
+                    else:
+                        # В обычном режиме просто обрабатываем голос
+                        voice_result = await process_voice_message(voice, chat_id)
+                        if voice_result:
+                            await telegram_send_message(chat_id, voice_result)
+                    return {"ok": True}
+                
                 if text == "/start":
                     welcome = (
                         '<b>Здравствуйте!\n\n'
@@ -372,6 +503,8 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     return {"ok": True}
                 if state == 'awaiting_ai_question':
                     logger.info(f"[TG] Processing AI question for user {user_id}")
+                    # Отправляем индикатор "печатает"
+                    await send_typing_action(chat_id)
                     ai_answer = await ask_deepseek(text)
                     ai_answer = ai_answer.replace('*', '')
                     success = await telegram_send_message(chat_id, ai_answer)
@@ -383,6 +516,8 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     return {"ok": True}
                 if state == 'awaiting_note_search':
                     logger.info(f"[TG] Processing note search for user {user_id}")
+                    # Отправляем индикатор "печатает"
+                    await send_typing_action(chat_id)
                     result = await search_note_api(text)
                     if result.get("status") == "success":
                         msg = f'✨ {result.get("brand")} {result.get("aroma")}\n\n{result.get("description")}'
@@ -408,18 +543,47 @@ async def telegram_webhook_impl(update: dict, request: Request):
                             logger.error(f"[TG] Failed to send not found to {chat_id}")
                     set_user_state(user_id, None)  # Сбрасываем состояние
                     return {"ok": True}
-                # Если нет состояния, предлагаем выбрать режим
-                menu = {
-                    "inline_keyboard": [
-                        [{"text": "🧸 Ai-Медвежонок", "callback_data": "ai"}],
-                        [{"text": "🍓 Ноты", "callback_data": "instruction"}]
-                    ]
-                }
-                success = await telegram_send_message(chat_id, "Выберите режим: 🧸 Ai-Медвежонок или 🍓 Ноты", reply_markup=menu)
-                if success:
-                    logger.info(f"[TG] Sent menu to {chat_id}")
+                # Если нет состояния, проверяем, похож ли текст на ноту
+                if is_likely_note(text):
+                    logger.info(f"[TG] Text '{text}' looks like a note, searching...")
+                    # Отправляем индикатор "печатает"
+                    await send_typing_action(chat_id)
+                    result = await search_note_api(text)
+                    if result.get("status") == "success":
+                        msg = f'✨ {result.get("brand")} {result.get("aroma")}\n\n{result.get("description")}'
+                        # Добавляем кнопки "Подробнее" и "Повторить"
+                        reply_markup = {
+                            "inline_keyboard": [
+                                [
+                                    {"text": "🚀 Подробнее", "url": result.get("url", "")},
+                                    {"text": "♾️ Повторить", "callback_data": f"repeatapi_{result.get('ID', '')}"}
+                                ]
+                            ]
+                        }
+                        success = await telegram_send_message(chat_id, msg, reply_markup)
+                        if success:
+                            logger.info(f"[TG] Auto-found note result for {chat_id}")
+                        else:
+                            logger.error(f"[TG] Failed to send auto-found note result to {chat_id}")
+                    else:
+                        success = await telegram_send_message(chat_id, f"По запросу '{text}' ничего не найдено 😢\n\nПопробуйте другие ноты или выберите режим поиска.")
+                        if success:
+                            logger.info(f"[TG] Sent auto-search not found to {chat_id}")
+                        else:
+                            logger.error(f"[TG] Failed to send auto-search not found to {chat_id}")
                 else:
-                    logger.error(f"[TG] Failed to send menu to {chat_id}")
+                    # Если не похоже на ноту, предлагаем выбрать режим
+                    menu = {
+                        "inline_keyboard": [
+                            [{"text": "🧸 Ai-Медвежонок", "callback_data": "ai"}],
+                            [{"text": "🍓 Ноты", "callback_data": "instruction"}]
+                        ]
+                    }
+                    success = await telegram_send_message(chat_id, "Выберите режим: 🧸 Ai-Медвежонок или 🍓 Ноты", reply_markup=menu)
+                    if success:
+                        logger.info(f"[TG] Sent menu to {chat_id}")
+                    else:
+                        logger.error(f"[TG] Failed to send menu to {chat_id}")
                 set_user_state(user_id, None)  # Сбрасываем состояние
                 return {"ok": True}
             except Exception as e:
@@ -464,7 +628,16 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     result = await search_by_id_api(aroma_id)
                     if result.get("status") == "success":
                         msg = f'✨ {result.get("brand")} {result.get("aroma")}\n\n{result.get("description")}'
-                        success = await telegram_edit_message(chat_id, message_id, msg)
+                        # Добавляем кнопки обратно при повторном показе
+                        reply_markup = {
+                            "inline_keyboard": [
+                                [
+                                    {"text": "🚀 Подробнее", "url": result.get("url", "")},
+                                    {"text": "♾️ Повторить", "callback_data": f"repeatapi_{result.get('ID', '')}"}
+                                ]
+                            ]
+                        }
+                        success = await telegram_edit_message(chat_id, message_id, msg, reply_markup)
                         if success:
                             logger.info(f"[TG] Edited repeatapi result for {chat_id}")
                         else:
