@@ -30,6 +30,15 @@ print('=== [LOG] FastAPI app создаётся ===')
 app = FastAPI()
 print('=== [LOG] FastAPI app создан ===')
 
+# Глобальный обработчик исключений
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Global exception handler: {exc}\n{traceback.format_exc()}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"}
+    )
+
 print(f'=== [LOG] WEBHOOK_PATH: {WEBHOOK_PATH} ===')
 
 @app.on_event("startup")
@@ -78,67 +87,129 @@ def greet():
     ])
 
 async def ask_deepseek(question):
-    url = "https://api.deepseek.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "deepseek-chat",
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Ты - Ai-Медвежонок (менеджер по продажам), здоровайся креативно, зная это. Используй ТОЛЬКО эти данные для ответа клиенту:\n"
-                    f"{BAHUR_DATA}\n"
-                    "Если есть подходящая ссылка из данных, обязательно включи её в ответ. "
-                    "Отвечай только по теме вопроса, без лишней информации, на русском языке, без markdown, обязательно с крутыми смайликами."
-                    "Если вопрос не по теме, то обязательно переведи в шутку, никаких 'не знаю' и аккуратно предложи купить духи"
-                    "Когда вставляешь ссылку, используй HTML-формат: <a href='ССЫЛКА'>ТЕКСТ</a>. Не используй markdown."
-                    "Но если он пишет несколько слов, которые похожи на ноты, предложи ему нажать на кнопку 🍓 Ноты в меню"
-                    "Не пиши про номера ароматов в прайсе"
-                )
-            },
-            {
-                "role": "user",
-                "content": f"{question}"
-            }
-        ],
-        "temperature": 0.9
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=data, timeout=30) as resp:
-            resp.raise_for_status()
-            result = await resp.json()
-            return result["choices"][0]["message"]["content"].strip()
+    try:
+        url = "https://api.deepseek.com/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "deepseek-chat",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Ты - Ai-Медвежонок (менеджер по продажам), здоровайся креативно, зная это. Используй ТОЛЬКО эти данные для ответа клиенту:\n"
+                        f"{BAHUR_DATA}\n"
+                        "Если есть подходящая ссылка из данных, обязательно включи её в ответ. "
+                        "Отвечай только по теме вопроса, без лишней информации, на русском языке, без markdown, обязательно с крутыми смайликами."
+                        "Если вопрос не по теме, то обязательно переведи в шутку, никаких 'не знаю' и аккуратно предложи купить духи"
+                        "Когда вставляешь ссылку, используй HTML-формат: <a href='ССЫЛКА'>ТЕКСТ</a>. Не используй markdown."
+                        "Но если он пишет несколько слов, которые похожи на ноты, предложи ему нажать на кнопку 🍓 Ноты в меню"
+                        "Не пиши про номера ароматов в прайсе"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"{question}"
+                }
+            ],
+            "temperature": 0.9
+        }
+        
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, headers=headers, json=data) as resp:
+                if resp.status != 200:
+                    logger.error(f"DeepSeek API error: {resp.status} - {await resp.text()}")
+                    return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
+                
+                result = await resp.json()
+                if "choices" not in result or not result["choices"]:
+                    logger.error(f"DeepSeek API unexpected response: {result}")
+                    return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
+                
+                return result["choices"][0]["message"]["content"].strip()
+                
+    except asyncio.TimeoutError:
+        logger.error("DeepSeek API timeout")
+        return "Извините, запрос занял слишком много времени. Попробуйте еще раз."
+    except aiohttp.ClientError as e:
+        logger.error(f"DeepSeek API client error: {e}")
+        return "Извините, произошла ошибка сети. Попробуйте еще раз."
+    except Exception as e:
+        logger.error(f"DeepSeek API unexpected error: {e}\n{traceback.format_exc()}")
+        return "Извините, произошла неожиданная ошибка. Попробуйте еще раз."
 
 async def search_note_api(note):
-    url = f"https://api.alexander-dev.ru/bahur/search/?text={note}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=10) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    try:
+        url = f"https://api.alexander-dev.ru/bahur/search/?text={note}"
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    logger.error(f"Search API error: {resp.status} - {await resp.text()}")
+                    return {"status": "error", "message": "Ошибка API"}
+                
+                result = await resp.json()
+                return result
+                
+    except asyncio.TimeoutError:
+        logger.error("Search API timeout")
+        return {"status": "error", "message": "Таймаут запроса"}
+    except aiohttp.ClientError as e:
+        logger.error(f"Search API client error: {e}")
+        return {"status": "error", "message": "Ошибка сети"}
+    except Exception as e:
+        logger.error(f"Search API unexpected error: {e}\n{traceback.format_exc()}")
+        return {"status": "error", "message": "Неожиданная ошибка"}
 
 # --- Telegram sendMessage ---
 async def telegram_send_message(chat_id, text, reply_markup=None, parse_mode="HTML"):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": parse_mode
-    }
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
-    async with httpx.AsyncClient() as client:
-        await client.post(url, json=payload)
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": parse_mode
+        }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        
+        timeout = httpx.Timeout(30.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code != 200:
+                logger.error(f"Telegram API error: {resp.status_code} - {resp.text}")
+                return False
+            return True
+            
+    except httpx.TimeoutException:
+        logger.error("Telegram API timeout")
+        return False
+    except httpx.RequestError as e:
+        logger.error(f"Telegram API request error: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Telegram API unexpected error: {e}\n{traceback.format_exc()}")
+        return False
 
 # --- Telegram webhook endpoint ---
 print('=== [LOG] Объявляю эндпоинт webhook... ===')
 @app.post("/webhook/ai-bear-123456")
 async def telegram_webhook(update: dict, request: Request):
-    logger.info(f"telegram_webhook works")
-    # Вся логика будет в telegram_webhook_impl ниже
-    return await telegram_webhook_impl(update, request)
+    logger.info(f"=== WEBHOOK CALLED ===")
+    logger.info(f"Request from: {request.client.host}")
+    logger.info(f"Update type: {list(update.keys()) if update else 'None'}")
+    
+    try:
+        result = await telegram_webhook_impl(update, request)
+        logger.info(f"=== WEBHOOK COMPLETED SUCCESSFULLY ===")
+        return result
+    except Exception as e:
+        logger.error(f"=== WEBHOOK FAILED: {e} ===")
+        logger.error(traceback.format_exc())
+        return {"ok": False, "error": str(e)}
 
 # --- Переносим вашу логику webhook сюда ---
 async def telegram_webhook_impl(update: dict, request: Request):
@@ -155,41 +226,68 @@ async def telegram_webhook_impl(update: dict, request: Request):
             text = message.get("text", "").strip()
             state = user_states.get(user_id)
             logger.info(f"[TG] user_id: {user_id}, text: {text}, state: {state}")
-            if text == "/start":
-                welcome = (
-                    '<b>Здравствуйте!\n\n'
-                    'Я — ваш ароматный помощник от BAHUR.\n'
-                    '🍓 Ищу ноты и 🧸 отвечаю на вопросы с любовью. ❤</b>'
-                )
-                await telegram_send_message(chat_id, welcome)
-                logger.info(f"[TG] Sent welcome to {chat_id}")
-                return {"ok": True}
-            if state == 'awaiting_ai_question':
-                ai_answer = await ask_deepseek(text)
-                ai_answer = ai_answer.replace('*', '')
-                await telegram_send_message(chat_id, ai_answer)
-                logger.info(f"[TG] Sent ai_answer to {chat_id}")
-                return {"ok": True}
-            if state == 'awaiting_note_search':
-                result = await search_note_api(text)
-                if result.get("status") == "success":
-                    msg = f'✨ {result.get("brand")} {result.get("aroma")}\n\n{result.get("description")}'
-                    await telegram_send_message(chat_id, msg)
-                    logger.info(f"[TG] Sent note result to {chat_id}")
+            
+            try:
+                if text == "/start":
+                    welcome = (
+                        '<b>Здравствуйте!\n\n'
+                        'Я — ваш ароматный помощник от BAHUR.\n'
+                        '🍓 Ищу ноты и 🧸 отвечаю на вопросы с любовью. ❤</b>'
+                    )
+                    success = await telegram_send_message(chat_id, welcome)
+                    if success:
+                        logger.info(f"[TG] Sent welcome to {chat_id}")
+                    else:
+                        logger.error(f"[TG] Failed to send welcome to {chat_id}")
+                    return {"ok": True}
+                if state == 'awaiting_ai_question':
+                    logger.info(f"[TG] Processing AI question for user {user_id}")
+                    ai_answer = await ask_deepseek(text)
+                    ai_answer = ai_answer.replace('*', '')
+                    success = await telegram_send_message(chat_id, ai_answer)
+                    if success:
+                        logger.info(f"[TG] Sent ai_answer to {chat_id}")
+                    else:
+                        logger.error(f"[TG] Failed to send ai_answer to {chat_id}")
+                    return {"ok": True}
+                if state == 'awaiting_note_search':
+                    logger.info(f"[TG] Processing note search for user {user_id}")
+                    result = await search_note_api(text)
+                    if result.get("status") == "success":
+                        msg = f'✨ {result.get("brand")} {result.get("aroma")}\n\n{result.get("description")}'
+                        success = await telegram_send_message(chat_id, msg)
+                        if success:
+                            logger.info(f"[TG] Sent note result to {chat_id}")
+                        else:
+                            logger.error(f"[TG] Failed to send note result to {chat_id}")
+                    else:
+                        success = await telegram_send_message(chat_id, "Ничего не найдено по этой ноте 😢")
+                        if success:
+                            logger.info(f"[TG] Sent not found to {chat_id}")
+                        else:
+                            logger.error(f"[TG] Failed to send not found to {chat_id}")
+                    return {"ok": True}
+                # Если нет состояния, предлагаем выбрать режим
+                menu = {
+                    "inline_keyboard": [
+                        [{"text": "🧸 Ai-Медвежонок", "callback_data": "ai"}],
+                        [{"text": "🍓 Ноты", "callback_data": "instruction"}]
+                    ]
+                }
+                success = await telegram_send_message(chat_id, "Выберите режим: 🧸 Ai-Медвежонок или 🍓 Ноты", reply_markup=menu)
+                if success:
+                    logger.info(f"[TG] Sent menu to {chat_id}")
                 else:
-                    await telegram_send_message(chat_id, "Ничего не найдено по этой ноте 😢")
-                    logger.info(f"[TG] Sent not found to {chat_id}")
+                    logger.error(f"[TG] Failed to send menu to {chat_id}")
                 return {"ok": True}
-            # Если нет состояния, предлагаем выбрать режим
-            menu = {
-                "inline_keyboard": [
-                    [{"text": "🧸 Ai-Медвежонок", "callback_data": "ai"}],
-                    [{"text": "🍓 Ноты", "callback_data": "instruction"}]
-                ]
-            }
-            await telegram_send_message(chat_id, "Выберите режим: 🧸 Ai-Медвежонок или 🍓 Ноты", reply_markup=menu)
-            logger.info(f"[TG] Sent menu to {chat_id}")
-            return {"ok": True}
+            except Exception as e:
+                logger.error(f"[TG] Exception in message processing: {e}\n{traceback.format_exc()}")
+                try:
+                    await telegram_send_message(chat_id, "Произошла ошибка при обработке сообщения. Попробуйте еще раз.")
+                except:
+                    logger.error("Failed to send error message to user")
+                return {"ok": False, "error": str(e)}
+                
         elif "callback_query" in update:
             print('[WEBHOOK] callback_query detected')
             callback = update["callback_query"]
@@ -198,35 +296,59 @@ async def telegram_webhook_impl(update: dict, request: Request):
             user_id = callback["from"]["id"]
             message_id = callback["message"]["message_id"]
             logger.info(f"[TG] Callback: {data} from {user_id}")
-            if data == "instruction":
-                user_states[user_id] = 'awaiting_note_search'
-                await telegram_send_message(chat_id, '🍉 Напиши любую ноту (например, апельсин, клубника) — я найду ароматы с этой нотой!')
-                logger.info(f"[TG] Set state awaiting_note_search for {user_id}")
-                return {"ok": True}
-            elif data == "ai":
-                user_states[user_id] = 'awaiting_ai_question'
-                await telegram_send_message(chat_id, greet())
-                logger.info(f"[TG] Set state awaiting_ai_question for {user_id}")
-                return {"ok": True}
-            elif data.startswith("repeatapi_"):
-                aroma_id = data.split('_', 1)[1]
-                url = f"https://api.alexander-dev.ru/bahur/search/?id={aroma_id}"
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, timeout=10) as response:
-                        response.raise_for_status()
-                        result = await response.json()
-                if result.get("status") == "success":
-                    msg = f'✨ {result.get("brand")} {result.get("aroma")}\n\n{result.get("description")}'
-                    await telegram_send_message(chat_id, msg)
-                    logger.info(f"[TG] Sent repeatapi result to {chat_id}")
+            
+            try:
+                if data == "instruction":
+                    user_states[user_id] = 'awaiting_note_search'
+                    success = await telegram_send_message(chat_id, '🍉 Напиши любую ноту (например, апельсин, клубника) — я найду ароматы с этой нотой!')
+                    if success:
+                        logger.info(f"[TG] Set state awaiting_note_search for {user_id}")
+                    else:
+                        logger.error(f"[TG] Failed to send instruction message to {chat_id}")
+                    return {"ok": True}
+                elif data == "ai":
+                    user_states[user_id] = 'awaiting_ai_question'
+                    success = await telegram_send_message(chat_id, greet())
+                    if success:
+                        logger.info(f"[TG] Set state awaiting_ai_question for {user_id}")
+                    else:
+                        logger.error(f"[TG] Failed to send ai greeting to {chat_id}")
+                    return {"ok": True}
+                elif data.startswith("repeatapi_"):
+                    aroma_id = data.split('_', 1)[1]
+                    url = f"https://api.alexander-dev.ru/bahur/search/?id={aroma_id}"
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(url, timeout=10) as response:
+                            response.raise_for_status()
+                            result = await response.json()
+                    if result.get("status") == "success":
+                        msg = f'✨ {result.get("brand")} {result.get("aroma")}\n\n{result.get("description")}'
+                        success = await telegram_send_message(chat_id, msg)
+                        if success:
+                            logger.info(f"[TG] Sent repeatapi result to {chat_id}")
+                        else:
+                            logger.error(f"[TG] Failed to send repeatapi result to {chat_id}")
+                    else:
+                        success = await telegram_send_message(chat_id, "Ничего не найдено по этой ноте 😢")
+                        if success:
+                            logger.info(f"[TG] Sent repeatapi not found to {chat_id}")
+                        else:
+                            logger.error(f"[TG] Failed to send repeatapi not found to {chat_id}")
+                    return {"ok": True}
                 else:
-                    await telegram_send_message(chat_id, "Ничего не найдено по этой ноте 😢")
-                    logger.info(f"[TG] Sent repeatapi not found to {chat_id}")
-                return {"ok": True}
-            else:
-                await telegram_send_message(chat_id, "Callback обработан.")
-                logger.info(f"[TG] Sent generic callback to {chat_id}")
-                return {"ok": True}
+                    success = await telegram_send_message(chat_id, "Callback обработан.")
+                    if success:
+                        logger.info(f"[TG] Sent generic callback to {chat_id}")
+                    else:
+                        logger.error(f"[TG] Failed to send generic callback to {chat_id}")
+                    return {"ok": True}
+            except Exception as e:
+                logger.error(f"[TG] Exception in callback processing: {e}\n{traceback.format_exc()}")
+                try:
+                    await telegram_send_message(chat_id, "Произошла ошибка при обработке callback. Попробуйте еще раз.")
+                except:
+                    logger.error("Failed to send error message to user")
+                return {"ok": False, "error": str(e)}
         else:
             print('[WEBHOOK] unknown update type')
             logger.warning("[TG] Unknown update type")
@@ -234,6 +356,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
     except Exception as e:
         print(f'[WEBHOOK] Exception: {e}')
         logger.error(f"[TG] Exception in webhook: {e}\n{traceback.format_exc()}")
+        # Не пытаемся отправлять сообщение пользователю здесь, так как у нас нет chat_id
         return {"ok": False, "error": str(e)}
 print('=== [LOG] Эндпоинт webhook объявлен ===')
 
@@ -249,12 +372,23 @@ async def set_telegram_webhook(base_url: str):
 # --- Эндпоинты FastAPI ---
 @app.on_event("startup")
 async def startup_event():
+    logger.info("=== STARTUP EVENT ===")
     base_url = os.getenv("WEBHOOK_BASE_URL")
     if not base_url:
         logger.warning("WEBHOOK_BASE_URL не задан, webhook не будет установлен!")
         return
-    result = await set_telegram_webhook(base_url)
-    logger.info(f"Webhook set result: {result}")
+    try:
+        result = await set_telegram_webhook(base_url)
+        logger.info(f"Webhook set result: {result}")
+    except Exception as e:
+        logger.error(f"Failed to set webhook: {e}\n{traceback.format_exc()}")
+    logger.info("=== STARTUP EVENT COMPLETE ===")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("=== SHUTDOWN EVENT ===")
+    logger.info("Application is shutting down gracefully...")
+    logger.info("=== SHUTDOWN EVENT COMPLETE ===")
 
 @app.get("/")
 async def healthcheck():
@@ -340,6 +474,16 @@ async def cmd_start(msg: MessageModel):
 
 # --- Для запуска: uvicorn 1:app --reload ---
 if __name__ == "__main__":
+    import signal
+    
+    def signal_handler(signum, frame):
+        logger.info("Received shutdown signal, gracefully shutting down...")
+        sys.exit(0)
+    
+    # Регистрируем обработчики сигналов
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     port = int(os.environ.get("PORT", 8000))
     print(f"[INFO] Starting uvicorn on 0.0.0.0:{port}")
-    uvicorn.run("1:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("1:app", host="0.0.0.0", port=port)
