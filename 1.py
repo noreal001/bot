@@ -546,8 +546,8 @@ async def recognize_voice_content(file_content, chat_id=None):
                 duration_seconds = len(audio) / 1000.0
                 logger.info(f"Voice message duration: {duration_seconds:.1f} seconds")
                 
-                # Если файл слишком длинный (больше 60 секунд), разбиваем на части
-                if duration_seconds > 60:
+                # Если файл слишком длинный (больше 2 минут), разбиваем на части
+                if duration_seconds > 120:
                     return await recognize_long_audio(audio, chat_id)
                 
                 # Для коротких файлов - обычная обработка
@@ -592,8 +592,8 @@ async def recognize_long_audio(audio_segment, chat_id=None):
         recognizer.energy_threshold = 300
         recognizer.pause_threshold = 0.8
         
-        # Разбиваем на части по 45 секунд с перекрытием 5 секунд
-        chunk_length = 45 * 1000  # 45 секунд в миллисекундах
+        # Разбиваем на части по 55 секунд с перекрытием 5 секунд
+        chunk_length = 55 * 1000  # 55 секунд в миллисекундах
         overlap = 5 * 1000        # 5 секунд перекрытия
         
         total_length = len(audio_segment)
@@ -612,7 +612,7 @@ async def recognize_long_audio(audio_segment, chat_id=None):
             logger.info(f"Processing audio chunk {current_chunk}/{chunks_count}: {start/1000:.1f}s - {end/1000:.1f}s")
             
             # Отправляем уведление о прогрессе
-            if chat_id and current_chunk % 2 == 0:  # Каждую вторую часть
+            if chat_id and current_chunk % 3 == 0:  # Каждую третью часть
                 progress_percent = int((current_chunk / chunks_count) * 100)
                 await send_progress_message(chat_id, 
                     f"🔄 Обрабатываю часть {current_chunk}/{chunks_count} ({progress_percent}%)")
@@ -1055,17 +1055,17 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     duration = voice.get("duration", 0)
                     file_size = voice.get("file_size", 0)
                     
-                    # Проверка максимальной длительности (5 минут)
-                    if duration > 300:
+                    # Проверка максимальной длительности (1 час)
+                    if duration > 3600:
                         await telegram_send_message(chat_id, 
-                            "🎙️ Голосовое сообщение слишком длинное (больше 5 минут). "
+                            "🎙️ Голосовое сообщение слишком длинное (больше 1 часа). "
                             "Пожалуйста, запишите более короткое сообщение или напишите текст.")
                         return {"ok": True}
                     
-                    # Проверка размера файла (20MB максимум)
-                    if file_size > 20 * 1024 * 1024:
+                    # Проверка размера файла (50MB максимум)
+                    if file_size > 50 * 1024 * 1024:
                         await telegram_send_message(chat_id, 
-                            "🎙️ Голосовое сообщение слишком большое. "
+                            "🎙️ Голосовое сообщение слишком большое (больше 50MB). "
                             "Пожалуйста, запишите более короткое сообщение.")
                         return {"ok": True}
                     
@@ -1075,7 +1075,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                         # Устанавливаем таймауты для длинных файлов
                         timeout = httpx.Timeout(
                             connect=10.0,
-                            read=60.0,  # Увеличенный таймаут для чтения больших файлов
+                            read=300.0,  # Увеличенный таймаут для чтения очень больших файлов (до часа)
                             write=10.0,
                             pool=10.0
                         )
@@ -1110,12 +1110,15 @@ async def telegram_webhook_impl(update: dict, request: Request):
                                 logger.info(f"[TG] Voice file downloaded, recognizing speech...")
                                 
                                 # Уведомляем о начале обработки для длинных файлов
-                                if duration > 60:
+                                if duration > 120:
+                                    minutes = duration // 60
+                                    seconds = duration % 60
+                                    duration_str = f"{minutes}м {seconds}с" if minutes > 0 else f"{duration}с"
                                     await send_progress_message(chat_id, 
-                                        f"🎙️ Обрабатываю длинное голосовое сообщение ({duration}с). "
+                                        f"🎙️ Обрабатываю длинное голосовое сообщение ({duration_str}). "
                                         "Это может занять некоторое время...")
                                 
-                                text_content = await recognize_voice_content(file_content, chat_id if duration > 60 else None)
+                                text_content = await recognize_voice_content(file_content, chat_id if duration > 120 else None)
                                 logger.info(f"[TG] Voice recognized text: {text_content[:100]}...")
                                 
                                 if text_content and not any(err in text_content for err in ["Ошибка", "Не удалось", "недоступно"]):
