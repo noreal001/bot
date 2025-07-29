@@ -17,9 +17,192 @@ import uvicorn
 from datetime import datetime, timedelta
 import threading
 import time
+import pandas as pd
 
 print('=== [LOG] 1.py импортирован ===')
 nest_asyncio.apply()
+
+# --- Работа с Excel данными ---
+EXCEL_FILE = "1.xlsx"
+excel_data = None
+
+def load_excel_data():
+    """Загружает данные из Excel файла"""
+    global excel_data
+    try:
+        # Читаем Excel файл с правильными заголовками
+        df = pd.read_excel(EXCEL_FILE, header=2, skiprows=[3])
+        
+        # Очищаем данные
+        df = df.dropna(how='all')
+        df = df[~df['Бренд'].astype(str).str.contains('Column', na=False)]
+        df = df[df['Бренд'].notna()]
+        
+        # Конвертируем типы данных
+        price_columns = ['30 GR', '50 GR', '500 GR', '1 KG', '5 KG', '10 KG']
+        for col in price_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        excel_data = df
+        logger.info(f"Excel data loaded: {len(df)} products")
+        return df
+    except Exception as e:
+        logger.error(f"Failed to load Excel data: {e}")
+        return None
+
+def search_products(query, limit=10):
+    """Поиск продуктов по названию бренда или аромата"""
+    global excel_data
+    if excel_data is None:
+        return []
+    
+    query = query.lower().strip()
+    
+    # Ищем по бренду и аромату
+    mask = (
+        excel_data['Бренд'].astype(str).str.lower().str.contains(query, na=False) |
+        excel_data['Аромат'].astype(str).str.lower().str.contains(query, na=False)
+    )
+    
+    results = excel_data[mask].head(limit)
+    return results.to_dict('records')
+
+def calculate_price(product, volume_ml):
+    """Рассчитывает цену за указанный объем"""
+    try:
+        volume_ml = float(volume_ml)
+        
+        # Определяем ценовую категорию
+        if 30 <= volume_ml < 50:
+            price_per_ml = product.get('30 GR', 0)
+        elif 50 <= volume_ml < 500:
+            price_per_ml = product.get('50 GR', 0)
+        elif 500 <= volume_ml < 1000:
+            price_per_ml = product.get('500 GR', 0)
+        elif volume_ml >= 1000:
+            price_per_ml = product.get('1 KG', 0)
+        else:
+            # Для объемов меньше 30 мл используем цену 30 GR
+            price_per_ml = product.get('30 GR', 0)
+        
+        if price_per_ml and not pd.isna(price_per_ml):
+            total_price = float(price_per_ml) * volume_ml
+            return {
+                'volume': volume_ml,
+                'price_per_ml': float(price_per_ml),
+                'total_price': total_price,
+                'currency': 'руб'
+            }
+    except (ValueError, TypeError):
+        pass
+    
+    return None
+
+def get_quality_name(quality_code):
+    """Конвертирует код качества в название"""
+    quality_map = {
+        6: 'TOP (высшее качество)',
+        5: 'Q1 (отличное качество)', 
+        4: 'Q2 (хорошее качество)'
+    }
+    return quality_map.get(quality_code, f'Качество {quality_code}')
+
+def get_top_products(factory=None, quality=None, sort_by='TOP LAST', limit=10):
+    """Получает топ продукты по статистике"""
+    global excel_data
+    if excel_data is None:
+        return []
+    
+    df = excel_data.copy()
+    
+    # Фильтры
+    if factory:
+        df = df[df['Фабрика'].str.upper() == factory.upper()]
+    if quality:
+        df = df[df['Качество'] == quality]
+    
+    # Сортировка по популярности
+    sort_column = 'TOP LAST' if sort_by == 'TOP LAST' else 'TOP ALL'
+    df = df.sort_values(sort_column, ascending=False, na_position='last')
+    
+    return df.head(limit).to_dict('records')
+
+def format_product_info(product, include_prices=True):
+    """Форматирует информацию о продукте для DeepSeek"""
+    try:
+        brand = product.get('Бренд', 'N/A')
+        aroma = product.get('Аромат', 'N/A')
+        factory = product.get('Фабрика', 'N/A')
+        quality = get_quality_name(product.get('Качество'))
+        
+        info = f"🏷️ {brand} - {aroma}\n"
+        info += f"🏭 Фабрика: {factory}\n"
+        info += f"⭐ {quality}\n"
+        
+        if include_prices:
+            prices = []
+            price_ranges = [
+                ('30 GR', '30-49 мл'),
+                ('50 GR', '50-499 мл'), 
+                ('500 GR', '500-999 мл'),
+                ('1 KG', '1000+ мл')
+            ]
+            
+            for col, range_text in price_ranges:
+                price = product.get(col)
+                if price and not pd.isna(price):
+                    prices.append(f"{range_text}: {price}₽/мл")
+            
+            if prices:
+                info += f"💰 Цены: {', '.join(prices)}\n"
+        
+        # Статистика популярности
+        top_last = product.get('TOP LAST')
+        top_all = product.get('TOP ALL')
+        if top_last and not pd.isna(top_last):
+            info += f"📈 Популярность (6 мес): {float(top_last)*100:.2f}%\n"
+        if top_all and not pd.isna(top_all):
+            info += f"📊 Популярность (всё время): {float(top_all)*100:.2f}%\n"
+        
+        return info.strip()
+    except Exception as e:
+        logger.error(f"Error formatting product info: {e}")
+        return f"❌ Ошибка форматирования данных о продукте"
+
+def get_excel_context_for_deepseek(query=""):
+    """Создает контекст из Excel данных для DeepSeek"""
+    try:
+        context = "\n=== АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ПРАЙС-ЛИСТА ===\n"
+        
+        # Если есть запрос, ищем релевантные продукты
+        if query:
+            products = search_products(query, limit=5)
+            if products:
+                context += f"\n🔍 НАЙДЕННЫЕ АРОМАТЫ ПО ЗАПРОСУ '{query}':\n"
+                for product in products:
+                    context += format_product_info(product) + "\n\n"
+        
+        # Добавляем топ популярные ароматы
+        top_products = get_top_products(sort_by='TOP LAST', limit=5)
+        if top_products:
+            context += "\n🔥 ТОП-5 ПОПУЛЯРНЫХ АРОМАТОВ (последние 6 месяцев):\n"
+            for i, product in enumerate(top_products, 1):
+                context += f"{i}. {format_product_info(product, include_prices=False)}\n\n"
+        
+        # Информация о фабриках
+        context += "\n🏭 ДОСТУПНЫЕ ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN, MANE\n"
+        context += "⭐ КАЧЕСТВА: TOP (6) > Q1 (5) > Q2 (4)\n"
+        context += "\n💰 ЦЕНОВЫЕ КАТЕГОРИИ:\n"
+        context += "• 30-49 мл: цена из столбца '30 GR'\n"
+        context += "• 50-499 мл: цена из столбца '50 GR'\n"
+        context += "• 500-999 мл: цена из столбца '500 GR'\n"
+        context += "• 1000+ мл: цена из столбца '1 KG'\n"
+        
+        return context
+    except Exception as e:
+        logger.error(f"Error creating Excel context: {e}")
+        return "\n❌ Ошибка загрузки актуальных данных из прайс-листа\n"
 
 # --- База данных SQLite ---
 DB_NAME = "bot_users.db"
@@ -271,6 +454,9 @@ logger = logging.getLogger(__name__)
 # --- Инициализация базы данных ---
 init_database()
 
+# --- Загрузка Excel данных ---
+load_excel_data()
+
 # --- Состояния пользователей для AI (in-memory, not persistent) ---
 user_states = {}
 
@@ -322,8 +508,73 @@ def greet():
     "Привет! 🌟🧸 Я Ai-Медвежонок — знаю всё о духах BAHUR! Спрашивай про любые ароматы, масла, доставку или цены — найду в каталоге и помогу с выбором! 💫"
     ])
 
+def analyze_query_for_excel_data(question):
+    """Анализирует запрос пользователя для определения нужности Excel данных"""
+    question_lower = question.lower()
+    
+    # Ключевые слова, указывающие на необходимость ценовой информации
+    price_keywords = ['цена', 'стоимость', 'стоит', 'сколько', 'руб', 'рубл', 'дорог', 'дешев', 'прайс']
+    
+    # Ключевые слова для поиска конкретных ароматов
+    search_keywords = ['найди', 'покажи', 'есть ли', 'аромат', 'духи', 'парфюм']
+    
+    # Ключевые слова для статистики и рекомендаций
+    stats_keywords = ['популярн', 'топ', 'лучш', 'рекоменд', 'посовет', 'модн', 'трендов']
+    
+    # Ключевые слова для фабрик и качества
+    factory_keywords = ['eps', 'luzi', 'seluz', 'фабрика', 'качество', 'top', 'q1', 'q2']
+    
+    needs_excel = any(keyword in question_lower for keyword in 
+                     price_keywords + search_keywords + stats_keywords + factory_keywords)
+    
+    # Извлекаем потенциальные названия ароматов для поиска
+    search_query = ""
+    words = question_lower.split()
+    for i, word in enumerate(words):
+        if word in search_keywords and i + 1 < len(words):
+            # Берем следующие 1-3 слова как потенциальный запрос
+            search_query = " ".join(words[i+1:i+4])
+            break
+    
+    return needs_excel, search_query
+
 async def ask_deepseek(question):
     try:
+        # Анализируем запрос для определения необходимости Excel данных
+        needs_excel, search_query = analyze_query_for_excel_data(question)
+        
+        # Формируем базовый контекст
+        system_content = (
+            "Ты - Ai-Медвежонок (менеджер по продажам), эксперт по ароматам BAHUR. "
+            "У тебя есть доступ к полному каталогу и актуальным ценам.\n"
+        )
+        
+        # Добавляем данные из текстового файла
+        system_content += f"\n=== БАЗОВЫЙ КАТАЛОГ ===\n{BAHUR_DATA}\n"
+        
+        # Добавляем Excel данные если нужно
+        if needs_excel:
+            excel_context = get_excel_context_for_deepseek(search_query)
+            system_content += excel_context
+        
+        system_content += (
+            "\nПРАВИЛА ОТВЕТОВ:\n"
+            "При написании названия аромата каждое слово пиши с большой буквы\n"
+            "Вставляй красивый и интересный смайлик в начале кнопки\n"
+            "Если делаешь подборку ароматов, используй только те ароматы которые есть в каталоге\n"
+            "1. Отвечай КОНКРЕТНО на вопрос клиента, используя данные из каталога\n"
+            "2. Если клиент спрашивает про аромат - найди его в данных и опиши подробно с ценами\n"
+            "3. Если клиент спрашивает про цены - рассчитай точную стоимость для нужного объема\n"
+            "4. Если есть подходящая ссылка из данных, обязательно включи её в ответ\n"
+            "5. Используй актуальные данные о популярности и фабриках\n"
+            "6. Отвечай на русском языке, с эмодзи, но БЕЗ markdown\n"
+            "7. Если вопрос не по теме ароматов - аккуратно переведи в шутку и предложи конкретный аромат\n"
+            "8. Когда вставляешь ссылку, используй HTML-формат: <a href='ССЫЛКА'>ТЕКСТ</a>\n"
+            "9. При расчете цен учитывай объемные скидки согласно прайс-листу\n"
+            "10. Упоминай фабрику и качество товара когда это релевантно\n"
+            "ВАЖНО: Если в ответе есть ссылки, используй формат <a href='ССЫЛКА'>ТЕКСТ</a> - они будут автоматически преобразованы в кнопки"
+        )
+        
         url = "https://api.deepseek.com/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API}",
@@ -334,25 +585,7 @@ async def ask_deepseek(question):
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "Ты - Ai-Медвежонок (менеджер по продажам), эксперт по ароматам BAHUR. Используй ТОЛЬКО эти данные для ответа клиенту:\n"
-                        f"{BAHUR_DATA}\n"
-                        "ПРАВИЛА ОТВЕТОВ:\n"
-                        "При написание какого-то аромата каждое слово пиши с большой буквы и если 2 слова через девиз"
-                        "Вставляй красивый и интересный смайлик в начале кнопки любой"
-                        "Если делаешь какую-то подборку ароматов на любое время года, то используй только те ароматы которые есть в моём каталоге\n"
-                        "1. Отвечай КОНКРЕТНО на вопрос клиента, используя данные из каталога\n"
-                        "2. Если клиент спрашивает про аромат - найди его в данных и опиши подробно\n"
-                        "3. Если клиент спрашивает про доставку/оплату - дай конкретную информацию\n"
-                        "4. Если есть подходящая ссылка из данных, обязательно включи её в ответ\n"
-                        "5. НЕ давай общих ответов типа 'пиши текстом' или 'нажми кнопку ноты'\n"
-                        "6. Отвечай на русском языке, с эмодзи, но БЕЗ markdown\n"
-                        "7. Если вопрос не по теме ароматов - аккуратно переведи в шутку и предложи конкретный аромат\n"
-                        "8. Когда вставляешь ссылку, используй HTML-формат: <a href='ССЫЛКА'>ТЕКСТ</a>\n"
-                        "9. НЕ предлагай 'нажать кнопку ноты' - вместо этого найди аромат в данных\n"
-                        "10. Если не можешь найти аромат в данных - предложи конкретные варианты из каталога\n"
-                        "ВАЖНО: Если в ответе есть ссылки, используй формат <a href='ССЫЛКА'>ТЕКСТ</a> - они будут автоматически преобразованы в кнопки"
-                    )
+                    "content": system_content
                 },
                 {
                     "role": "user",
@@ -1606,6 +1839,164 @@ async def get_users_list():
         
     except Exception as e:
         logger.error(f"Failed to get users list: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Endpoints для работы с Excel данными ---
+
+@app.get("/products/search")
+async def search_products_api(q: str, limit: int = 10):
+    """Поиск товаров по названию бренда или аромата"""
+    try:
+        products = search_products(q, limit)
+        return JSONResponse({
+            "query": q,
+            "count": len(products),
+            "products": products
+        })
+    except Exception as e:
+        logger.error(f"Search products error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/products/calculate-price")
+async def calculate_price_api(brand: str, aroma: str, volume: float):
+    """Рассчитать цену для конкретного товара и объема"""
+    try:
+        # Ищем товар
+        query = f"{brand} {aroma}"
+        products = search_products(query, limit=1)
+        
+        if not products:
+            return JSONResponse({
+                "error": f"Товар '{query}' не найден",
+                "suggestions": search_products(brand, limit=3)
+            }, status_code=404)
+        
+        product = products[0]
+        price_info = calculate_price(product, volume)
+        
+        if not price_info:
+            return JSONResponse({
+                "error": "Не удалось рассчитать цену для указанного объема",
+                "product": product
+            }, status_code=400)
+        
+        return JSONResponse({
+            "product": {
+                "brand": product.get('Бренд'),
+                "aroma": product.get('Аромат'),
+                "factory": product.get('Фабрика'),
+                "quality": get_quality_name(product.get('Качество'))
+            },
+            "price_calculation": price_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Price calculation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/products/top")
+async def get_top_products_api(
+    factory: str = None, 
+    quality: int = None, 
+    sort_by: str = "TOP LAST", 
+    limit: int = 10
+):
+    """Получить топ товары по популярности"""
+    try:
+        products = get_top_products(factory, quality, sort_by, limit)
+        
+        # Форматируем данные для API
+        formatted_products = []
+        for product in products:
+            formatted_products.append({
+                "brand": product.get('Бренд'),
+                "aroma": product.get('Аромат'),
+                "factory": product.get('Фабрика'),
+                "quality": get_quality_name(product.get('Качество')),
+                "quality_code": product.get('Качество'),
+                "prices": {
+                    "30_49_ml": product.get('30 GR'),
+                    "50_499_ml": product.get('50 GR'),
+                    "500_999_ml": product.get('500 GR'),
+                    "1000_plus_ml": product.get('1 KG')
+                },
+                "popularity": {
+                    "last_6_months": float(product.get('TOP LAST', 0)) * 100,
+                    "all_time": float(product.get('TOP ALL', 0)) * 100
+                }
+            })
+        
+        return JSONResponse({
+            "filters": {
+                "factory": factory,
+                "quality": quality,
+                "sort_by": sort_by
+            },
+            "count": len(formatted_products),
+            "products": formatted_products
+        })
+        
+    except Exception as e:
+        logger.error(f"Get top products error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/products/stats")
+async def get_products_stats():
+    """Получить общую статистику по товарам"""
+    try:
+        global excel_data
+        if excel_data is None:
+            load_excel_data()
+        
+        if excel_data is None:
+            raise HTTPException(status_code=500, detail="Excel data not available")
+        
+        # Статистика по фабрикам
+        factory_stats = excel_data['Фабрика'].value_counts().to_dict()
+        
+        # Статистика по качеству
+        quality_stats = excel_data['Качество'].value_counts().to_dict()
+        
+        # Ценовые диапазоны
+        price_stats = {}
+        for col in ['30 GR', '50 GR', '500 GR', '1 KG']:
+            if col in excel_data.columns:
+                prices = excel_data[col].dropna()
+                if len(prices) > 0:
+                    price_stats[col] = {
+                        "min": float(prices.min()),
+                        "max": float(prices.max()),
+                        "avg": float(prices.mean()),
+                        "count": len(prices)
+                    }
+        
+        return JSONResponse({
+            "total_products": len(excel_data),
+            "factories": factory_stats,
+            "qualities": quality_stats,
+            "price_ranges": price_stats,
+            "last_updated": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Get products stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/products/reload")
+async def reload_excel_data():
+    """Перезагрузить данные из Excel файла"""
+    try:
+        df = load_excel_data()
+        if df is not None:
+            return JSONResponse({
+                "status": "success",
+                "message": "Excel data reloaded successfully",
+                "products_count": len(df)
+            })
+        else:
+            raise HTTPException(status_code=500, detail="Failed to reload Excel data")
+    except Exception as e:
+        logger.error(f"Reload Excel data error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Для запуска: uvicorn 1:app --reload ---
