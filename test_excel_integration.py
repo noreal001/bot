@@ -6,24 +6,92 @@
 import pandas as pd
 import re
 
+def get_quality_name(quality_code):
+    """Конвертирует код качества в краткое название"""
+    quality_map = {
+        6: 'TOP',
+        5: 'Q1', 
+        4: 'Q2'
+    }
+    return quality_map.get(quality_code, f'{quality_code}')
+
 # Загрузка данных из Excel
 def load_excel_demo():
     """Демо загрузки данных"""
-    print("🔄 Загружаю данные из Excel...")
+    print("🔄 Загружаю данные из Google Sheets...")
     
-    df = pd.read_excel('1.xlsx', header=2, skiprows=[3])
-    df = df.dropna(how='all')
-    df = df[~df['Бренд'].astype(str).str.contains('Column', na=False)]
-    df = df[df['Бренд'].notna()]
+    GOOGLE_SHEETS_URL = "https://docs.google.com/spreadsheets/d/1rvb3QdanuukCyXnoQZZxz7HF6aJXm2de/export?format=xlsx&gid=1870986273"
     
-    # Конвертируем числовые столбцы
-    numeric_columns = ['30 GR', '50 GR', '500 GR', '1 KG', '5 KG', '10 KG', 'TOP LAST', 'TOP ALL']
-    for col in numeric_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    print(f"✅ Загружено {len(df)} товаров")
-    return df
+    try:
+        # Читаем данные напрямую из Google Sheets
+        df = pd.read_excel(GOOGLE_SHEETS_URL, header=2, skiprows=[3])
+        
+        # Очищаем данные
+        df = df.dropna(how='all')
+        
+        # Фильтруем по наличию бренда и аромата
+        df = df[df.iloc[:, 3].notna() & df.iloc[:, 4].notna()]  # Столбцы F и G
+        
+        # Переименовываем столбцы
+        column_mapping = {
+            df.columns[3]: 'Бренд',      # Столбец F
+            df.columns[4]: 'Аромат',     # Столбец G  
+            df.columns[5]: 'Пол',        # Столбец H
+            df.columns[6]: 'Фабрика',    # Столбец I
+            df.columns[7]: 'Качество',   # Столбец J
+            df.columns[8]: '30 GR',      # Столбец K
+            df.columns[9]: '50 GR',      # Столбец L
+            df.columns[10]: '500 GR',    # Столбец M
+            df.columns[11]: '1 KG',      # Столбец N
+        }
+        
+        # Найдем столбцы TOP LAST и TOP ALL
+        for i, col in enumerate(df.columns):
+            if 'TOP LAST' in str(col):
+                column_mapping[col] = 'TOP LAST'
+            elif 'TOP ALL' in str(col):
+                column_mapping[col] = 'TOP ALL'
+        
+        df = df.rename(columns=column_mapping)
+        
+        # Конвертируем типы данных
+        price_columns = ['30 GR', '50 GR', '500 GR', '1 KG']
+        for col in price_columns:
+            if col in df.columns:
+                # Убираем символы валюты и конвертируем в числа
+                df[col] = df[col].astype(str).str.replace('₽', '').str.replace(' ', '')
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Конвертируем столбцы популярности
+        if 'TOP LAST' in df.columns:
+            df['TOP LAST'] = df['TOP LAST'].astype(str).str.replace('%', '').str.replace(',', '.')
+            df['TOP LAST'] = pd.to_numeric(df['TOP LAST'], errors='coerce') / 100
+        
+        if 'TOP ALL' in df.columns:
+            df['TOP ALL'] = df['TOP ALL'].astype(str).str.replace('%', '').str.replace(',', '.')
+            df['TOP ALL'] = pd.to_numeric(df['TOP ALL'], errors='coerce') / 100
+        
+        print(f"✅ Загружено {len(df)} товаров из Google Sheets")
+        return df
+        
+    except Exception as e:
+        print(f"❌ Ошибка загрузки из Google Sheets: {e}")
+        print("🔄 Пытаюсь загрузить локальный файл...")
+        
+        # Fallback к локальному файлу
+        df = pd.read_excel('1.xlsx', header=2, skiprows=[3])
+        df = df.dropna(how='all')
+        df = df[~df['Бренд'].astype(str).str.contains('Column', na=False)]
+        df = df[df['Бренд'].notna()]
+        
+        # Конвертируем числовые столбцы
+        numeric_columns = ['30 GR', '50 GR', '500 GR', '1 KG', '5 KG', '10 KG', 'TOP LAST', 'TOP ALL']
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        print(f"✅ Загружено {len(df)} товаров из локального файла")
+        return df
 
 def search_products_demo(df, query):
     """Демо поиска товаров"""
@@ -40,7 +108,7 @@ def search_products_demo(df, query):
     
     for i, (idx, row) in enumerate(results.iterrows()):
         print(f"  {i+1}. {row['Бренд']} - {row['Аромат']}")
-        print(f"     🏭 Фабрика: {row['Фабрика']}, ⭐ Качество: {row['Качество']}")
+        print(f"     🏭 Фабрика: {row['Фабрика']}, ⭐ Качество: {get_quality_name(row['Качество'])}")
         print(f"     💰 Цены: 50мл={row.get('50 GR', 'N/A')}₽/мл, 500мл={row.get('500 GR', 'N/A')}₽/мл")
         print()
     
@@ -96,7 +164,7 @@ def create_ai_context_demo(df, query):
         for _, product in products.iterrows():
             context += f"🏷️ {product['Бренд']} - {product['Аромат']}\n"
             context += f"🏭 Фабрика: {product['Фабрика']}\n"
-            context += f"⭐ Качество: {product['Качество']}\n"
+            context += f"⭐ Качество: {get_quality_name(product['Качество'])}\n"
             
             prices = []
             for col, range_text in [('30 GR', '30-49мл'), ('50 GR', '50-499мл'), 
@@ -130,7 +198,7 @@ def create_ai_context_demo(df, query):
         context += "🔥 ТОП АРОМАТОВ: данные недоступны\n"
     
     context += "\n🏭 ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN, MANE\n"
-    context += "⭐ КАЧЕСТВА: 6 (TOP) > 5 (Q1) > 4 (Q2)\n"
+    context += "⭐ КАЧЕСТВА: TOP > Q1 > Q2\n"
     
     print("✅ Контекст создан")
     return context
@@ -166,7 +234,7 @@ def main():
     if len(results) > 0:
         product = results.iloc[0]
         print(f"🏷️ {product['Бренд']} - {product['Аромат']}")
-        print(f"🏭 Фабрика {product['Фабрика']}, качество {product['Качество']}")
+        print(f"🏭 Фабрика {product['Фабрика']}, качество {get_quality_name(product['Качество'])}")
         
         if product.get('50 GR') and not pd.isna(product.get('50 GR')):
             price_50ml = float(product['50 GR']) * 50

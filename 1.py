@@ -23,33 +23,111 @@ print('=== [LOG] 1.py импортирован ===')
 nest_asyncio.apply()
 
 # --- Работа с Excel данными ---
-EXCEL_FILE = "1.xlsx"
+GOOGLE_SHEETS_URL = "https://docs.google.com/spreadsheets/d/1rvb3QdanuukCyXnoQZZxz7HF6aJXm2de/export?format=xlsx&gid=1870986273"
 excel_data = None
 
 def load_excel_data():
-    """Загружает данные из Excel файла"""
+    """Загружает данные из Google Sheets"""
     global excel_data
     try:
-        # Читаем Excel файл с правильными заголовками
-        df = pd.read_excel(EXCEL_FILE, header=2, skiprows=[3])
+        logger.info("Loading data from Google Sheets...")
+        
+        import requests
+        import io
+        import ssl
+        
+        # Отключаем проверку SSL для Google Sheets
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        # Загружаем данные через requests
+        session = requests.Session()
+        session.verify = False  # Отключаем SSL проверку
+        
+        response = session.get(GOOGLE_SHEETS_URL, timeout=30)
+        response.raise_for_status()
+        
+        # Читаем Excel из памяти
+        df = pd.read_excel(io.BytesIO(response.content), header=2, skiprows=[3])
         
         # Очищаем данные
         df = df.dropna(how='all')
-        df = df[~df['Бренд'].astype(str).str.contains('Column', na=False)]
-        df = df[df['Бренд'].notna()]
+        
+        # Фильтруем по наличию бренда и аромата (столбцы 5 и 6)
+        if len(df.columns) > 6:
+            df = df[df.iloc[:, 5].notna() & df.iloc[:, 6].notna()]
+        else:
+            logger.warning("Not enough columns in Google Sheets data")
+            raise Exception("Invalid data structure")
+        
+        # Переименовываем столбцы для удобства
+        if len(df.columns) >= 15:
+            column_mapping = {
+                df.columns[5]: 'Бренд',      # Столбец 5
+                df.columns[6]: 'Аромат',     # Столбец 6
+                df.columns[7]: 'Пол',        # Столбец 7
+                df.columns[8]: 'Фабрика',    # Столбец 8
+                df.columns[9]: 'Качество',   # Столбец 9
+                df.columns[11]: '30 GR',     # Столбец 11
+                df.columns[12]: '50 GR',     # Столбец 12
+                df.columns[13]: '500 GR',    # Столбец 13
+                df.columns[14]: '1 KG',      # Столбец 14
+            }
+            
+            # Добавляем столбцы TOP LAST и TOP ALL (столбцы 23 и 24)
+            if len(df.columns) > 23:
+                column_mapping[df.columns[23]] = 'TOP LAST'
+            if len(df.columns) > 24:
+                column_mapping[df.columns[24]] = 'TOP ALL'
+            
+            df = df.rename(columns=column_mapping)
+        else:
+            logger.warning(f"Not enough columns: {len(df.columns)}")
+            raise Exception("Invalid column structure")
         
         # Конвертируем типы данных
-        price_columns = ['30 GR', '50 GR', '500 GR', '1 KG', '5 KG', '10 KG']
+        price_columns = ['30 GR', '50 GR', '500 GR', '1 KG']
         for col in price_columns:
             if col in df.columns:
+                # Убираем символы валюты и конвертируем в числа
+                df[col] = df[col].astype(str).str.replace('₽', '').str.replace(' ', '').str.replace('nan', '')
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
+        # Конвертируем столбцы популярности (уже в долях от 0 до 1)
+        if 'TOP LAST' in df.columns:
+            df['TOP LAST'] = pd.to_numeric(df['TOP LAST'], errors='coerce')
+        
+        if 'TOP ALL' in df.columns:
+            df['TOP ALL'] = pd.to_numeric(df['TOP ALL'], errors='coerce')
+        
+        # Очищаем от строк без данных
+        df = df[df['Бренд'].notna() & df['Аромат'].notna()]
+        
         excel_data = df
-        logger.info(f"Excel data loaded: {len(df)} products")
+        logger.info(f"Google Sheets data loaded: {len(df)} products")
         return df
+        
     except Exception as e:
-        logger.error(f"Failed to load Excel data: {e}")
-        return None
+        logger.error(f"Failed to load Google Sheets data: {e}")
+        # Fallback к локальному файлу
+        try:
+            logger.info("Falling back to local Excel file...")
+            df = pd.read_excel("1.xlsx", header=2, skiprows=[3])
+            df = df.dropna(how='all')
+            df = df[~df['Бренд'].astype(str).str.contains('Column', na=False)]
+            df = df[df['Бренд'].notna()]
+            
+            price_columns = ['30 GR', '50 GR', '500 GR', '1 KG', '5 KG', '10 KG']
+            for col in price_columns:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            excel_data = df
+            logger.info(f"Local Excel data loaded: {len(df)} products")
+            return df
+        except Exception as e2:
+            logger.error(f"Failed to load local Excel data: {e2}")
+            return None
 
 def search_products(query, limit=10):
     """Поиск продуктов по названию бренда или аромата"""
@@ -102,11 +180,20 @@ def calculate_price(product, volume_ml):
 def get_quality_name(quality_code):
     """Конвертирует код качества в название"""
     quality_map = {
+        6: 'TOP',
+        5: 'Q1', 
+        4: 'Q2'
+    }
+    return quality_map.get(quality_code, f'{quality_code}')
+
+def get_quality_description(quality_code):
+    """Получает подробное описание качества"""
+    quality_desc_map = {
         6: 'TOP (высшее качество)',
         5: 'Q1 (отличное качество)', 
         4: 'Q2 (хорошее качество)'
     }
-    return quality_map.get(quality_code, f'Качество {quality_code}')
+    return quality_desc_map.get(quality_code, f'Качество {quality_code}')
 
 def get_top_products(factory=None, quality=None, sort_by='TOP LAST', limit=10):
     """Получает топ продукты по статистике"""
@@ -128,17 +215,22 @@ def get_top_products(factory=None, quality=None, sort_by='TOP LAST', limit=10):
     
     return df.head(limit).to_dict('records')
 
-def format_product_info(product, include_prices=True):
-    """Форматирует информацию о продукте для DeepSeek"""
+def format_product_info(product, include_prices=True, for_deepseek=True):
+    """Форматирует информацию о продукте"""
     try:
         brand = product.get('Бренд', 'N/A')
         aroma = product.get('Аромат', 'N/A')
         factory = product.get('Фабрика', 'N/A')
-        quality = get_quality_name(product.get('Качество'))
+        
+        # Для DeepSeek используем краткие названия, для пользователей - подробные
+        if for_deepseek:
+            quality = get_quality_name(product.get('Качество'))
+        else:
+            quality = get_quality_description(product.get('Качество'))
         
         info = f"🏷️ {brand} - {aroma}\n"
         info += f"🏭 Фабрика: {factory}\n"
-        info += f"⭐ {quality}\n"
+        info += f"⭐ Качество: {quality}\n"
         
         if include_prices:
             prices = []
@@ -173,35 +265,87 @@ def format_product_info(product, include_prices=True):
 def get_excel_context_for_deepseek(query=""):
     """Создает контекст из Excel данных для DeepSeek"""
     try:
+        global excel_data
+        
+        # Статистика для логирования
+        stats = {
+            'total_products': len(excel_data) if excel_data is not None else 0,
+            'search_query': query,
+            'found_products': 0,
+            'top_products': 0,
+            'context_length': 0
+        }
+        
+        logger.info(f"📊 СОЗДАНИЕ КОНТЕКСТА ДЛЯ DEEPSEEK")
+        logger.info(f"  📋 Общее количество товаров в базе: {stats['total_products']}")
+        logger.info(f"  🔍 Поисковый запрос: '{query}'")
+        
         context = "\n=== АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ПРАЙС-ЛИСТА ===\n"
         
         # Если есть запрос, ищем релевантные продукты
         if query:
             products = search_products(query, limit=5)
+            stats['found_products'] = len(products)
+            
             if products:
+                logger.info(f"  ✅ Найдено товаров по запросу: {len(products)}")
                 context += f"\n🔍 НАЙДЕННЫЕ АРОМАТЫ ПО ЗАПРОСУ '{query}':\n"
-                for product in products:
-                    context += format_product_info(product) + "\n\n"
+                
+                for i, product in enumerate(products, 1):
+                    brand = product.get('Бренд', 'N/A')
+                    aroma = product.get('Аромат', 'N/A')
+                    factory = product.get('Фабрика', 'N/A') 
+                    quality = get_quality_name(product.get('Качество', 0))
+                    price_50 = product.get('50 GR', 'N/A')
+                    
+                    logger.info(f"    {i}. {brand} - {aroma}")
+                    logger.info(f"       🏭 Фабрика: {factory}, ⭐ Качество: {quality}")
+                    logger.info(f"       💰 Цена 50 GR: {price_50}₽/мл")
+                    
+                    context += format_product_info(product, include_prices=True, for_deepseek=True) + "\n\n"
+            else:
+                logger.info(f"  ❌ Товары по запросу '{query}' не найдены")
         
         # Добавляем топ популярные ароматы
         top_products = get_top_products(sort_by='TOP LAST', limit=5)
+        stats['top_products'] = len(top_products)
+        
         if top_products:
+            logger.info(f"  🔥 Добавляем ТОП-{len(top_products)} популярных ароматов:")
             context += "\n🔥 ТОП-5 ПОПУЛЯРНЫХ АРОМАТОВ (последние 6 месяцев):\n"
+            
             for i, product in enumerate(top_products, 1):
-                context += f"{i}. {format_product_info(product, include_prices=False)}\n\n"
+                brand = product.get('Бренд', 'N/A')
+                aroma = product.get('Аромат', 'N/A')
+                factory = product.get('Фабрика', 'N/A')
+                quality = get_quality_name(product.get('Качество', 0))
+                popularity = product.get('TOP LAST', 0)
+                
+                logger.info(f"    {i}. {brand} - {aroma} (фабрика: {factory}, качество: {quality}, популярность: {popularity*100:.2f}%)")
+                context += f"{i}. {format_product_info(product, include_prices=False, for_deepseek=True)}\n\n"
+        else:
+            logger.warning("  ⚠️ Не удалось получить популярные ароматы")
         
         # Информация о фабриках
         context += "\n🏭 ДОСТУПНЫЕ ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN, MANE\n"
-        context += "⭐ КАЧЕСТВА: TOP (6) > Q1 (5) > Q2 (4)\n"
+        context += "⭐ КАЧЕСТВА: TOP > Q1 > Q2\n"
         context += "\n💰 ЦЕНОВЫЕ КАТЕГОРИИ:\n"
         context += "• 30-49 мл: цена из столбца '30 GR'\n"
         context += "• 50-499 мл: цена из столбца '50 GR'\n"
         context += "• 500-999 мл: цена из столбца '500 GR'\n"
         context += "• 1000+ мл: цена из столбца '1 KG'\n"
         
+        stats['context_length'] = len(context)
+        
+        logger.info(f"  📄 СТАТИСТИКА КОНТЕКСТА:")
+        logger.info(f"    - Найдено товаров: {stats['found_products']}")
+        logger.info(f"    - ТОП товаров: {stats['top_products']}")
+        logger.info(f"    - Размер контекста: {stats['context_length']} символов")
+        logger.info(f"  ✅ Контекст успешно создан для DeepSeek")
+        
         return context
     except Exception as e:
-        logger.error(f"Error creating Excel context: {e}")
+        logger.error(f"❌ Ошибка создания контекста для DeepSeek: {e}")
         return "\n❌ Ошибка загрузки актуальных данных из прайс-листа\n"
 
 # --- База данных SQLite ---
@@ -524,8 +668,26 @@ def analyze_query_for_excel_data(question):
     # Ключевые слова для фабрик и качества
     factory_keywords = ['eps', 'luzi', 'seluz', 'фабрика', 'качество', 'top', 'q1', 'q2']
     
+    # Определяем, какие типы ключевых слов найдены
+    found_price = [kw for kw in price_keywords if kw in question_lower]
+    found_search = [kw for kw in search_keywords if kw in question_lower]
+    found_stats = [kw for kw in stats_keywords if kw in question_lower]
+    found_factory = [kw for kw in factory_keywords if kw in question_lower]
+    
     needs_excel = any(keyword in question_lower for keyword in 
                      price_keywords + search_keywords + stats_keywords + factory_keywords)
+    
+    # Логируем детали анализа
+    if needs_excel:
+        logger.info(f"    🔍 ДЕТАЛИ АНАЛИЗА:")
+        if found_price:
+            logger.info(f"      💰 Ценовые ключевые слова: {found_price}")
+        if found_search:
+            logger.info(f"      🔎 Поисковые ключевые слова: {found_search}")
+        if found_stats:
+            logger.info(f"      📊 Статистические ключевые слова: {found_stats}")
+        if found_factory:
+            logger.info(f"      🏭 Фабричные ключевые слова: {found_factory}")
     
     # Извлекаем потенциальные названия ароматов для поиска
     search_query = ""
@@ -536,12 +698,26 @@ def analyze_query_for_excel_data(question):
             search_query = " ".join(words[i+1:i+4])
             break
     
+    # Также ищем известные бренды в вопросе
+    common_brands = ['ajmal', 'bvlgari', 'kilian', 'creed', 'tom ford', 'dior', 'chanel', 'ysl', 'afnan']
+    found_brands = [brand for brand in common_brands if brand in question_lower]
+    if found_brands and not search_query:
+        search_query = found_brands[0]
+        logger.info(f"      🏷️ Найден бренд в запросе: {found_brands[0]}")
+    
     return needs_excel, search_query
 
 async def ask_deepseek(question):
     try:
+        logger.info(f"🧠 ЗАПРОС К DEEPSEEK")
+        logger.info(f"  ❓ Вопрос пользователя: '{question}'")
+        
         # Анализируем запрос для определения необходимости Excel данных
         needs_excel, search_query = analyze_query_for_excel_data(question)
+        
+        logger.info(f"  📊 АНАЛИЗ ЗАПРОСА:")
+        logger.info(f"    - Нужны данные Excel: {needs_excel}")
+        logger.info(f"    - Поисковый запрос: '{search_query}'")
         
         # Формируем базовый контекст
         system_content = (
@@ -551,11 +727,20 @@ async def ask_deepseek(question):
         
         # Добавляем данные из текстового файла
         system_content += f"\n=== БАЗОВЫЙ КАТАЛОГ ===\n{BAHUR_DATA}\n"
+        base_context_length = len(system_content)
+        
+        logger.info(f"  📄 БАЗОВЫЙ КОНТЕКСТ: {base_context_length} символов")
         
         # Добавляем Excel данные если нужно
         if needs_excel:
+            logger.info(f"  📊 Загружаем данные из Excel таблицы...")
             excel_context = get_excel_context_for_deepseek(search_query)
             system_content += excel_context
+            
+            excel_context_length = len(excel_context)
+            logger.info(f"  📈 КОНТЕКСТ ИЗ EXCEL: {excel_context_length} символов")
+        else:
+            logger.info(f"  ℹ️ Excel данные не требуются для этого запроса")
         
         system_content += (
             "\nПРАВИЛА ОТВЕТОВ:\n"
@@ -595,28 +780,41 @@ async def ask_deepseek(question):
             "temperature": 0.5
         }
         
+        # Финальная статистика перед отправкой
+        total_context_length = len(system_content)
+        logger.info(f"  📊 ФИНАЛЬНАЯ СТАТИСТИКА:")
+        logger.info(f"    - Общий размер контекста: {total_context_length} символов")
+        logger.info(f"    - Использованы Excel данные: {needs_excel}")
+        logger.info(f"  🚀 Отправляем запрос в DeepSeek...")
+        
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, headers=headers, json=data) as resp:
                 if resp.status != 200:
-                    logger.error(f"DeepSeek API error: {resp.status} - {await resp.text()}")
+                    logger.error(f"❌ DeepSeek API error: {resp.status} - {await resp.text()}")
                     return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
                 
                 result = await resp.json()
                 if "choices" not in result or not result["choices"]:
-                    logger.error(f"DeepSeek API unexpected response: {result}")
+                    logger.error(f"❌ DeepSeek API unexpected response: {result}")
                     return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
                 
-                return result["choices"][0]["message"]["content"].strip()
+                response_content = result["choices"][0]["message"]["content"].strip()
+                
+                logger.info(f"  ✅ ОТВЕТ ОТ DEEPSEEK ПОЛУЧЕН:")
+                logger.info(f"    - Длина ответа: {len(response_content)} символов")
+                logger.info(f"    - Первые 200 символов: '{response_content[:200]}{'...' if len(response_content) > 200 else ''}'")
+                
+                return response_content
                 
     except asyncio.TimeoutError:
-        logger.error("DeepSeek API timeout")
+        logger.error(f"⏰ DeepSeek API timeout для вопроса: '{question}'")
         return "Извините, запрос занял слишком много времени. Попробуйте еще раз."
     except aiohttp.ClientError as e:
-        logger.error(f"DeepSeek API client error: {e}")
+        logger.error(f"🌐 DeepSeek API client error для вопроса '{question}': {e}")
         return "Извините, произошла ошибка сети. Попробуйте еще раз."
     except Exception as e:
-        logger.error(f"DeepSeek API unexpected error: {e}\n{traceback.format_exc()}")
+        logger.error(f"💥 DeepSeek API unexpected error для вопроса '{question}': {e}\n{traceback.format_exc()}")
         return "Извините, произошла неожиданная ошибка. Попробуйте еще раз."
 
 async def search_note_api(note):
@@ -1885,7 +2083,7 @@ async def calculate_price_api(brand: str, aroma: str, volume: float):
                 "brand": product.get('Бренд'),
                 "aroma": product.get('Аромат'),
                 "factory": product.get('Фабрика'),
-                "quality": get_quality_name(product.get('Качество'))
+                "quality": get_quality_description(product.get('Качество'))
             },
             "price_calculation": price_info
         })
@@ -1912,7 +2110,7 @@ async def get_top_products_api(
                 "brand": product.get('Бренд'),
                 "aroma": product.get('Аромат'),
                 "factory": product.get('Фабрика'),
-                "quality": get_quality_name(product.get('Качество')),
+                "quality": get_quality_description(product.get('Качество')),
                 "quality_code": product.get('Качество'),
                 "prices": {
                     "30_49_ml": product.get('30 GR'),
