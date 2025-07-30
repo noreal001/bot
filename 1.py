@@ -304,51 +304,55 @@ def get_aroma_variants_stats(aroma_name):
     return result
 
 def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats=False):
-    """Создает контекст из Excel данных для DeepSeek, с расчетом цен и статистикой вариантов"""
+    """Создает СТРОГО СТРУКТУРИРОВАННЫЙ контекст из Excel данных для DeepSeek, с расчетом цен и статистикой вариантов"""
     try:
         context = "\n=== АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ПРАЙС-ЛИСТА ===\n"
-        # Если есть запрос, ищем релевантные продукты
+        context += "ВНИМАНИЕ: Используй ТОЛЬКО эти цены и проценты, не придумывай свои значения!\n"
+        def format_prices(product):
+            prices = []
+            price_map = [
+                ("30 GR", 30),
+                ("50 GR", 50),
+                ("500 GR", 500),
+                ("1 KG", 1000)
+            ]
+            for col, vol in price_map:
+                price_per_g = product.get(col)
+                if price_per_g and not pd.isna(price_per_g):
+                    total = int(price_per_g * vol)
+                    prices.append(f"• {vol} мл — {price_per_g}₽/мл = {total}₽")
+                else:
+                    prices.append(f"• {vol} мл — Цена недоступна")
+            return "\n".join(prices)
+        def get_top_variant(variants):
+            if not variants:
+                return None
+            top = max(variants, key=lambda v: v.get('popularity_raw', 0))
+            return top
+        # Поиск по запросу
         if query:
             products = search_products(query, limit=5)
             if products:
                 context += f"\n🔍 НАЙДЕННЫЕ АРОМАТЫ ПО ЗАПРОСУ '{query}':\n"
-                for product in products:
-                    context += format_product_info(product, include_prices=True, for_deepseek=True) + "\n\n"
-                # Если запрошен расчет цены для объема
-                if volume_ml:
-                    context += f"\n🔥 ТОП-5 популярных ароматов (с расчетом стоимости за {volume_ml} г):\n"
-                    for i, product in enumerate(products, 1):
-                        brand = product.get('Бренд', 'N/A')
-                        aroma = product.get('Аромат', 'N/A')
-                        factory = product.get('Фабрика', 'N/A')
-                        quality = product.get('Качество', 'N/A')
-                        # Выбор правильного tier
-                        if volume_ml <= 49:
-                            price_per_g = product.get('30 GR', 0)
-                            tier = '30-49 мл'
-                        elif volume_ml <= 499:
-                            price_per_g = product.get('50 GR', 0)
-                            tier = '50-499 мл'
-                        elif volume_ml <= 999:
-                            price_per_g = product.get('500 GR', 0)
-                            tier = '500-999 мл'
-                        else:
-                            price_per_g = product.get('1 KG', 0)
-                            tier = '1000+ мл'
-                        if price_per_g and not pd.isna(price_per_g):
-                            total = price_per_g * volume_ml
-                            context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   💰 Цена за {volume_ml} г: {int(total)}₽ ({price_per_g}₽/г × {volume_ml}) [{tier}]\n\n"
-                        else:
-                            context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   💰 Цена недоступна\n\n"
+                for i, product in enumerate(products, 1):
+                    brand = product.get('Бренд', 'N/A')
+                    aroma = product.get('Аромат', 'N/A')
+                    factory = product.get('Фабрика', 'N/A')
+                    quality = product.get('Качество', 'N/A')
+                    popularity_last = product.get('TOP LAST', 0)
+                    popularity_all = product.get('TOP ALL', 0)
+                    context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last*100:.2f}%\n   📊 Популярность (всё время): {popularity_all*100:.2f}%\n   💰 Цены:\n{format_prices(product)}\n\n"
                 # Если запрошена статистика по вариантам
                 if show_variants_stats and len(products) > 0:
                     aroma_name = products[0].get('Аромат', '')
                     variants_stats = get_aroma_variants_stats(aroma_name)
                     if variants_stats:
+                        top_variant = get_top_variant(variants_stats)
                         context += f"\n📊 СТАТИСТИКА ПО ВАРИАНТАМ АРОМАТА '{aroma_name}':\n"
                         for v in variants_stats:
-                            context += f"- {v['factory']} ({v['quality']}): {v['popularity_percent']:.1f}%\n"
-        # Добавляем топ популярные ароматы
+                            mark = " (самый популярный)" if top_variant and v['factory'] == top_variant['factory'] and v['quality'] == top_variant['quality'] else ""
+                            context += f"- {v['factory']} ({v['quality']}): {v['popularity_percent']:.1f}%{mark}\n"
+        # ТОП-5 популярных ароматов
         top_products = get_top_products(sort_by='TOP LAST', limit=5)
         if top_products:
             context += "\n🔥 ТОП-5 ПОПУЛЯРНЫХ АРОМАТОВ (последние 6 месяцев):\n"
@@ -357,8 +361,9 @@ def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats
                 aroma = product.get('Аромат', 'N/A')
                 factory = product.get('Фабрика', 'N/A')
                 quality = product.get('Качество', 'N/A')
-                popularity = product.get('TOP LAST', 0)
-                context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity*100:.2f}%\n\n"
+                popularity_last = product.get('TOP LAST', 0)
+                popularity_all = product.get('TOP ALL', 0)
+                context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last*100:.2f}%\n   📊 Популярность (всё время): {popularity_all*100:.2f}%\n   💰 Цены:\n{format_prices(product)}\n\n"
         # Информация о фабриках
         context += "\n🏭 ДОСТУПНЫЕ ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN, MANE\n"
         context += "⭐ КАЧЕСТВА: TOP > Q1 > Q2\n"
@@ -797,6 +802,8 @@ async def ask_deepseek(question):
             "13. Упоминай фабрику и качество товара когда это релевантно\n"
             "14. ВАЖНО: Если в ответе есть ссылки, используй формат <a href='ССЫЛКА'>ТЕКСТ</a> - они будут автоматически преобразованы в кнопки\n"
             "15. Когда даешь ссылку в кнопку, если это связано не с товаром, то красиво её называй, отражая, что там внутри при переходе. Не пиши некрасивые названия по типу: тут или вот\n"
+            "16. В ответах не использовать слова DELUXE, у нас есть только три категории фабрик?\n"
+            "17. Используй только те цены и проценты, которые указаны в контексте. Не придумывай свои значения.\n"
         )
         
         url = "https://api.deepseek.com/v1/chat/completions"
@@ -1916,31 +1923,10 @@ async def healthcheck():
 async def handle_message(msg: MessageModel):
     user_id = msg.user_id
     text = msg.text.strip()
-    state = get_user_state(user_id)
-    logger.info(f"[SUPERLOG] user_id: {user_id}, text: {text}, state: {state}")
-    try:
-        if state == 'awaiting_ai_question':
-            # Отправляем индикатор "печатает" (но здесь нет chat_id, поэтому пропускаем)
-            ai_answer = await ask_deepseek(text)
-            ai_answer = ai_answer.replace('*', '')
-            return JSONResponse({"answer": ai_answer, "parse_mode": "HTML"})
-        elif state == 'awaiting_note_search':
-            result = await search_note_api(text)
-            if result.get("status") == "success":
-                return JSONResponse({
-                    "brand": result.get("brand"),
-                    "aroma": result.get("aroma"),
-                    "description": result.get("description"),
-                    "url": result.get("url"),
-                    "aroma_id": result.get("ID")
-                })
-            else:
-                return JSONResponse({"error": "Ничего не найдено по этой ноте 😢"})
-        else:
-            return JSONResponse({"info": "Нет активного режима для пользователя. Используйте /start или callback."})
-    except Exception as e:
-        logger.error(f"[SUPERLOG] Exception in handle_message: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Всегда сразу режим Ai-Медвежонок
+    ai_answer = await ask_deepseek(text)
+    ai_answer = ai_answer.replace('*', '')
+    return JSONResponse({"answer": ai_answer, "parse_mode": "HTML"})
 
 @app.post("/callback")
 async def handle_callback(cb: CallbackModel):
