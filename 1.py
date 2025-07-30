@@ -759,18 +759,10 @@ def analyze_query_for_excel_data(question):
     
     return needs_excel, search_query
 
-async def ask_deepseek(question, user_id=None):
+async def ask_deepseek(question):
     try:
         logger.info(f"🧠 ЗАПРОС К DEEPSEEK")
         logger.info(f"  ❓ Вопрос пользователя: '{question}'")
-        # --- Новый блок: добавляем историю сообщений пользователя ---
-        history_block = ""
-        if user_id is not None:
-            history = get_last_messages(user_id)
-            if history:
-                history_block = "\n=== ИСТОРИЯ ДИАЛОГА ===\n"
-                for msg in history[-10:]:
-                    history_block += f"Пользователь: {msg}\n"
         # Анализируем запрос для определения необходимости Excel данных
         needs_excel, search_query = analyze_query_for_excel_data(question)
         
@@ -799,8 +791,7 @@ async def ask_deepseek(question, user_id=None):
             "У тебя есть доступ к полному каталогу и актуальным ценам.\n"
         )
         # Добавляем историю диалога
-        if history_block:
-            system_content += history_block
+        history_block = ""
         base_context_length = len(system_content)
         logger.info(f"  📄 БАЗОВЫЙ КОНТЕКСТ: {base_context_length} символов")
         
@@ -1200,7 +1191,7 @@ async def process_voice_message(voice, chat_id):
                 text_content = await recognize_voice_content(file_content, chat_id)
                 # Если результат не ошибка, отправляем в дипсик
                 if text_content and not any(err in text_content for err in ["Ошибка", "Не удалось", "недоступно"]):
-                    ai_answer = await ask_deepseek(text_content, user_id=chat_id)
+                    ai_answer = await ask_deepseek(text_content)
                     return ai_answer
                 else:
                     return text_content
@@ -1250,7 +1241,7 @@ async def process_voice_message_alternative(voice, chat_id):
                 # Пытаемся распознать речь без aifc
                 text_content = await recognize_voice_content(file_content, chat_id)
                 if text_content and not any(err in text_content for err in ["Ошибка", "Не удалось", "недоступно"]):
-                    ai_answer = await ask_deepseek(text_content, user_id=chat_id)
+                    ai_answer = await ask_deepseek(text_content)
                     return ai_answer
                 else:
                     return text_content
@@ -1546,7 +1537,6 @@ async def telegram_webhook_impl(update: dict, request: Request):
             voice = message.get("voice")
             state = get_user_state(user_id)
             logger.info(f"[TG] user_id: {user_id}, text: {text}, state: {state}")
-            add_message_to_history(user_id, text)
             
             try:
                 # Обновляем активность пользователя для любого сообщения
@@ -1631,7 +1621,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                                 logger.info(f"[TG] Voice recognized text: {text_content[:100]}...")
                                 
                                 if text_content and not any(err in text_content for err in ["Ошибка", "Не удалось", "недоступно"]):
-                                    ai_answer = await ask_deepseek(text_content, user_id=user_id)
+                                    ai_answer = await ask_deepseek(text_content)
                                     ai_answer = ai_answer.replace('*', '')
                                     buttons = extract_links_from_text(ai_answer)
                                     ai_answer_clean = remove_html_links(ai_answer)
@@ -1726,7 +1716,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     logger.info(f"[TG] Processing AI question for user {user_id}")
                     # Отправляем индикатор "печатает"
                     await send_typing_action(chat_id)
-                    ai_answer = await ask_deepseek(text, user_id=user_id)
+                    ai_answer = await ask_deepseek(text)
                     ai_answer = ai_answer.replace('*', '')
                     
                     # Извлекаем ссылки из ответа и создаем кнопки
@@ -1955,8 +1945,7 @@ async def healthcheck():
 async def handle_message(msg: MessageModel):
     user_id = msg.user_id
     text = msg.text.strip()
-    add_message_to_history(user_id, text)
-    ai_answer = await ask_deepseek(text, user_id=user_id)
+    ai_answer = await ask_deepseek(text)
     ai_answer = ai_answer.replace('*', '')
     return JSONResponse({"answer": ai_answer, "parse_mode": "HTML"})
 
