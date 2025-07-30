@@ -133,22 +133,21 @@ def load_excel_data():
             logger.error(f"Failed to load local Excel data: {e2}")
             return None
 
+def normalize_name(name):
+    return str(name).lower().replace('-', '').replace('’', '').replace("'", '').replace(' ', '')
+
 def search_products(query, limit=None):
-    """Поиск продуктов по названию бренда или аромата (точное совпадение при полном совпадении запроса)"""
     global excel_data
     if excel_data is None:
         return []
-    query = query.lower().strip()
-    # Если есть точное совпадение по аромату — только его
-    exact_mask = excel_data['Аромат'].astype(str).str.lower().str.strip() == query
+    query_norm = normalize_name(query)
+    # Точное совпадение по нормализованному названию
+    exact_mask = excel_data['Аромат'].astype(str).apply(normalize_name) == query_norm
     if exact_mask.any():
         results = excel_data[exact_mask]
     else:
-        # Иначе ищем по бренду и аромату (частичное совпадение)
-        mask = (
-            excel_data['Бренд'].astype(str).str.lower().str.contains(query, na=False) |
-            excel_data['Аромат'].astype(str).str.lower().str.contains(query, na=False)
-        )
+        # Частичное совпадение по нормализованному названию
+        mask = excel_data['Аромат'].astype(str).apply(normalize_name).str.contains(query_norm, na=False)
         results = excel_data[mask]
     if limit:
         results = results.head(limit)
@@ -833,11 +832,16 @@ async def ask_deepseek(question):
             "11. Когда вставляешь ссылку, используй HTML-формат: <a href='ССЫЛКА'>ТЕКСТ</a>\n"
             "12. При расчете цен учитывай объемные скидки согласно прайс-листу\n"
             "13. Упоминай фабрику и качество товара когда это релевантно\n"
-            "14. В ответах не использовать слова DELUXE, у нас есть только три категории фабрик: TOP, Q1, Q2\n"
+            "14. В ответах не используй слова DELUXE, у нас есть только три категории фабрик: TOP, Q1, Q2\n"
             "15. Используй только те цены и проценты, которые указаны в контексте. Не придумывай свои значения.\n"
             "16. Если даёшь ссылку на прайс, она должна вести на http://clck.ru/jrimp. Не использовать ссылки на вопросы и ответы вместо прайса.\n"
             "17. Используй только красивые, уникальные смайлы, без цифр-смайлов\n"
             "18. Если пишешь текст с ароматами то каждый букву нового слова пиши с больщой буквы или если через дефис то, тоже первая буква с большой буквы\n"
+            "19. Не упоминай никакие ароматы которых нет у нас в каталоге или в прайсе\n"
+            "20 Старайся говорить коротко, красиво и ясно и на основе данных которые есть в bahur_data.txt без фантазий и выдумок\n"
+            "21. Не придумывай ароматы, которых нет в списке ниже. Если не найдено — скажи, что такого аромата нет в каталоге.\n"
+            "22. Выводи все найденные ароматы из списка, не сокращай и не группируй.\n"
+            
         )
         
         url = "https://api.deepseek.com/v1/chat/completions"
