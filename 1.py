@@ -322,10 +322,22 @@ def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats
                         aroma = product.get('Аромат', 'N/A')
                         factory = product.get('Фабрика', 'N/A')
                         quality = product.get('Качество', 'N/A')
-                        price_per_g = product.get('50 GR', 0)
+                        # Выбор правильного tier
+                        if volume_ml <= 49:
+                            price_per_g = product.get('30 GR', 0)
+                            tier = '30-49 мл'
+                        elif volume_ml <= 499:
+                            price_per_g = product.get('50 GR', 0)
+                            tier = '50-499 мл'
+                        elif volume_ml <= 999:
+                            price_per_g = product.get('500 GR', 0)
+                            tier = '500-999 мл'
+                        else:
+                            price_per_g = product.get('1 KG', 0)
+                            tier = '1000+ мл'
                         if price_per_g and not pd.isna(price_per_g):
                             total = price_per_g * volume_ml
-                            context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   💰 {price_per_g}₽/г × {volume_ml} = {int(total)}₽\n\n"
+                            context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   💰 Цена за {volume_ml} г: {int(total)}₽ ({price_per_g}₽/г × {volume_ml}) [{tier}]\n\n"
                         else:
                             context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   💰 Цена недоступна\n\n"
                 # Если запрошена статистика по вариантам
