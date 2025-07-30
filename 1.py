@@ -277,70 +277,76 @@ def format_product_info(product, include_prices=True, for_deepseek=True):
         logger.error(f"Error formatting product info: {e}")
         return f"❌ Ошибка форматирования данных о продукте"
 
-def get_excel_context_for_deepseek(query=""):
-    """Создает контекст из Excel данных для DeepSeek"""
+def get_aroma_variants_stats(aroma_name):
+    """Возвращает статистику по вариантам аромата (фабрика+качество)"""
+    global excel_data
+    if excel_data is None:
+        return []
+    mask = excel_data['Аромат'].str.lower().str.strip() == aroma_name.lower().strip()
+    variants = excel_data[mask]
+    if variants.empty:
+        return []
+    total_popularity = variants['TOP LAST'].sum()
+    if total_popularity == 0:
+        return []
+    result = []
+    for _, row in variants.iterrows():
+        factory = row['Фабрика']
+        quality = row['Качество']
+        popularity = row['TOP LAST']
+        percent = (popularity / total_popularity) * 100 if total_popularity else 0
+        result.append({
+            'factory': factory,
+            'quality': quality,
+            'popularity_percent': percent,
+            'popularity_raw': popularity
+        })
+    return result
+
+def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats=False):
+    """Создает контекст из Excel данных для DeepSeek, с расчетом цен и статистикой вариантов"""
     try:
-        global excel_data
-        
-        # Статистика для логирования
-        stats = {
-            'total_products': len(excel_data) if excel_data is not None else 0,
-            'search_query': query,
-            'found_products': 0,
-            'top_products': 0,
-            'context_length': 0
-        }
-        
-        logger.info(f"📊 СОЗДАНИЕ КОНТЕКСТА ДЛЯ DEEPSEEK")
-        logger.info(f"  📋 Общее количество товаров в базе: {stats['total_products']}")
-        logger.info(f"  🔍 Поисковый запрос: '{query}'")
-        
         context = "\n=== АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ПРАЙС-ЛИСТА ===\n"
-        
         # Если есть запрос, ищем релевантные продукты
         if query:
             products = search_products(query, limit=5)
-            stats['found_products'] = len(products)
-            
             if products:
-                logger.info(f"  ✅ Найдено товаров по запросу: {len(products)}")
                 context += f"\n🔍 НАЙДЕННЫЕ АРОМАТЫ ПО ЗАПРОСУ '{query}':\n"
-                
-                for i, product in enumerate(products, 1):
-                    brand = product.get('Бренд', 'N/A')
-                    aroma = product.get('Аромат', 'N/A')
-                    factory = product.get('Фабрика', 'N/A') 
-                    quality = product.get('Качество', 'N/A')  # Качество уже в формате TOP/Q1/Q2
-                    price_50 = product.get('50 GR', 'N/A')
-                    
-                    logger.info(f"    {i}. {brand} - {aroma}")
-                    logger.info(f"       🏭 Фабрика: {factory}, ⭐ Качество: {quality}")
-                    logger.info(f"       💰 Цена 50 GR: {price_50}₽/мл")
-                    
+                for product in products:
                     context += format_product_info(product, include_prices=True, for_deepseek=True) + "\n\n"
-            else:
-                logger.info(f"  ❌ Товары по запросу '{query}' не найдены")
-        
+                # Если запрошен расчет цены для объема
+                if volume_ml:
+                    context += f"\n🔥 ТОП-5 популярных ароматов (с расчетом стоимости за {volume_ml} г):\n"
+                    for i, product in enumerate(products, 1):
+                        brand = product.get('Бренд', 'N/A')
+                        aroma = product.get('Аромат', 'N/A')
+                        factory = product.get('Фабрика', 'N/A')
+                        quality = product.get('Качество', 'N/A')
+                        price_per_g = product.get('50 GR', 0)
+                        if price_per_g and not pd.isna(price_per_g):
+                            total = price_per_g * volume_ml
+                            context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   💰 {price_per_g}₽/г × {volume_ml} = {int(total)}₽\n\n"
+                        else:
+                            context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   💰 Цена недоступна\n\n"
+                # Если запрошена статистика по вариантам
+                if show_variants_stats and len(products) > 0:
+                    aroma_name = products[0].get('Аромат', '')
+                    variants_stats = get_aroma_variants_stats(aroma_name)
+                    if variants_stats:
+                        context += f"\n📊 СТАТИСТИКА ПО ВАРИАНТАМ АРОМАТА '{aroma_name}':\n"
+                        for v in variants_stats:
+                            context += f"- {v['factory']} ({v['quality']}): {v['popularity_percent']:.1f}%\n"
         # Добавляем топ популярные ароматы
         top_products = get_top_products(sort_by='TOP LAST', limit=5)
-        stats['top_products'] = len(top_products)
-        
         if top_products:
-            logger.info(f"  🔥 Добавляем ТОП-{len(top_products)} популярных ароматов:")
             context += "\n🔥 ТОП-5 ПОПУЛЯРНЫХ АРОМАТОВ (последние 6 месяцев):\n"
-            
             for i, product in enumerate(top_products, 1):
                 brand = product.get('Бренд', 'N/A')
                 aroma = product.get('Аромат', 'N/A')
                 factory = product.get('Фабрика', 'N/A')
-                quality = product.get('Качество', 'N/A')  # Качество уже в формате TOP/Q1/Q2
+                quality = product.get('Качество', 'N/A')
                 popularity = product.get('TOP LAST', 0)
-                
-                logger.info(f"    {i}. {brand} - {aroma} (фабрика: {factory}, качество: {quality}, популярность: {popularity*100:.2f}%)")
-                context += f"{i}. {format_product_info(product, include_prices=False, for_deepseek=True)}\n\n"
-        else:
-            logger.warning("  ⚠️ Не удалось получить популярные ароматы")
-        
+                context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity*100:.2f}%\n\n"
         # Информация о фабриках
         context += "\n🏭 ДОСТУПНЫЕ ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN, MANE\n"
         context += "⭐ КАЧЕСТВА: TOP > Q1 > Q2\n"
@@ -349,18 +355,9 @@ def get_excel_context_for_deepseek(query=""):
         context += "• 50-499 мл: цена из столбца '50 GR'\n"
         context += "• 500-999 мл: цена из столбца '500 GR'\n"
         context += "• 1000+ мл: цена из столбца '1 KG'\n"
-        
-        stats['context_length'] = len(context)
-        
-        logger.info(f"  📄 СТАТИСТИКА КОНТЕКСТА:")
-        logger.info(f"    - Найдено товаров: {stats['found_products']}")
-        logger.info(f"    - ТОП товаров: {stats['top_products']}")
-        logger.info(f"    - Размер контекста: {stats['context_length']} символов")
-        logger.info(f"  ✅ Контекст успешно создан для DeepSeek")
-        
         return context
     except Exception as e:
-        logger.error(f"❌ Ошибка создания контекста для DeepSeek: {e}")
+        logger.error(f"Error creating Excel context: {e}")
         return "\n❌ Ошибка загрузки актуальных данных из прайс-листа\n"
 
 # --- База данных SQLite ---
@@ -730,9 +727,24 @@ async def ask_deepseek(question):
         # Анализируем запрос для определения необходимости Excel данных
         needs_excel, search_query = analyze_query_for_excel_data(question)
         
-        logger.info(f"  📊 АНАЛИЗ ЗАПРОСА:")
-        logger.info(f"    - Нужны данные Excel: {needs_excel}")
-        logger.info(f"    - Поисковый запрос: '{search_query}'")
+        # --- Новый блок: определение объема из вопроса ---
+        volume_ml = None
+        volume_match = re.search(r'(\d{2,4})\s*(мл|ml|г|гр|грамм|грамма|граммов)', question.lower())
+        if volume_match:
+            volume_ml = int(volume_match.group(1))
+            logger.info(f"  📦 Найден объем в запросе: {volume_ml} мл/г")
+        else:
+            logger.info(f"  📦 Объем в запросе не найден")
+        
+        # --- Новый блок: определение необходимости статистики по вариантам ---
+        show_variants_stats = False
+        if needs_excel and search_query:
+            # Если найдено несколько вариантов одного аромата, показываем статистику
+            products = search_products(search_query, limit=10)
+            aroma_names = set(p['Аромат'].strip().lower() for p in products)
+            if len(products) > 1 and len(aroma_names) == 1:
+                show_variants_stats = True
+                logger.info(f"  📊 Включена статистика по вариантам аромата '{search_query}'")
         
         # Формируем базовый контекст
         system_content = (
@@ -743,15 +755,13 @@ async def ask_deepseek(question):
         # Добавляем данные из текстового файла
         system_content += f"\n=== БАЗОВЫЙ КАТАЛОГ ===\n{BAHUR_DATA}\n"
         base_context_length = len(system_content)
-        
         logger.info(f"  📄 БАЗОВЫЙ КОНТЕКСТ: {base_context_length} символов")
         
         # Добавляем Excel данные если нужно
         if needs_excel:
             logger.info(f"  📊 Загружаем данные из Excel таблицы...")
-            excel_context = get_excel_context_for_deepseek(search_query)
+            excel_context = get_excel_context_for_deepseek(search_query, volume_ml=volume_ml, show_variants_stats=show_variants_stats)
             system_content += excel_context
-            
             excel_context_length = len(excel_context)
             logger.info(f"  📈 КОНТЕКСТ ИЗ EXCEL: {excel_context_length} символов")
         else:
@@ -759,7 +769,7 @@ async def ask_deepseek(question):
         
         system_content += (
             "\nПРАВИЛА ОТВЕТОВ:\n"
-            "Используй только красивые, уникальный смайлы, без цифр-смайлов\n"
+            "Используй только красивые, уникальные смайлы, без цифр-смайлов\n"
             "1. При написании названия аромата каждое слово пиши с большой буквы\n"
             "2. Вставляй красивый и интересный смайлик в начале кнопки\n"
             "3. Если делаешь подборку ароматов, используй только те ароматы которые есть в каталоге\n"
@@ -773,7 +783,8 @@ async def ask_deepseek(question):
             "11. Когда вставляешь ссылку, используй HTML-формат: <a href='ССЫЛКА'>ТЕКСТ</a>\n"
             "12. При расчете цен учитывай объемные скидки согласно прайс-листу\n"
             "13. Упоминай фабрику и качество товара когда это релевантно\n"
-            "14. ВАЖНО: Если в ответе есть ссылки, используй формат <a href='ССЫЛКА'>ТЕКСТ</a> - они будут автоматически преобразованы в кнопки"
+            "14. ВАЖНО: Если в ответе есть ссылки, используй формат <a href='ССЫЛКА'>ТЕКСТ</a> - они будут автоматически преобразованы в кнопки\n"
+            "15. Когда даешь ссылку в кнопку, если это связано не с товаром, то красиво её называй, отражая, что там внутри при переходе. Не пиши некрасивые названия по типу: тут или вот\n"
         )
         
         url = "https://api.deepseek.com/v1/chat/completions"
