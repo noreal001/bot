@@ -133,21 +133,25 @@ def load_excel_data():
             logger.error(f"Failed to load local Excel data: {e2}")
             return None
 
-def search_products(query, limit=10):
-    """Поиск продуктов по названию бренда или аромата"""
+def search_products(query, limit=None):
+    """Поиск продуктов по названию бренда или аромата (точное совпадение при полном совпадении запроса)"""
     global excel_data
     if excel_data is None:
         return []
-    
     query = query.lower().strip()
-    
-    # Ищем по бренду и аромату
-    mask = (
-        excel_data['Бренд'].astype(str).str.lower().str.contains(query, na=False) |
-        excel_data['Аромат'].astype(str).str.lower().str.contains(query, na=False)
-    )
-    
-    results = excel_data[mask].head(limit)
+    # Если есть точное совпадение по аромату — только его
+    exact_mask = excel_data['Аромат'].astype(str).str.lower().str.strip() == query
+    if exact_mask.any():
+        results = excel_data[exact_mask]
+    else:
+        # Иначе ищем по бренду и аромату (частичное совпадение)
+        mask = (
+            excel_data['Бренд'].astype(str).str.lower().str.contains(query, na=False) |
+            excel_data['Аромат'].astype(str).str.lower().str.contains(query, na=False)
+        )
+        results = excel_data[mask]
+    if limit:
+        results = results.head(limit)
     return results.to_dict('records')
 
 def calculate_price(product, volume_ml):
@@ -201,25 +205,23 @@ def get_quality_description(quality_code):
     }
     return quality_desc_map.get(quality_code, f'Качество {quality_code}')
 
-def get_top_products(factory=None, quality=None, sort_by='TOP LAST', limit=10):
-    """Получает топ продукты по статистике"""
+def get_top_products(factory=None, quality=None, sort_by='TOP LAST', limit=None):
+    """Получает топ продукты по статистике (без лимита по умолчанию)"""
     global excel_data
     if excel_data is None:
         return []
-    
     df = excel_data.copy()
-    
     # Фильтры
     if factory:
         df = df[df['Фабрика'].str.upper() == factory.upper()]
     if quality:
         df = df[df['Качество'] == quality]
-    
     # Сортировка по популярности
     sort_column = 'TOP LAST' if sort_by == 'TOP LAST' else 'TOP ALL'
     df = df.sort_values(sort_column, ascending=False, na_position='last')
-    
-    return df.head(limit).to_dict('records')
+    if limit:
+        df = df.head(limit)
+    return df.to_dict('records')
 
 def format_product_info(product, include_prices=True, for_deepseek=True):
     """Форматирует информацию о продукте"""
@@ -308,6 +310,7 @@ def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats
     try:
         context = "\n=== АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ПРАЙС-ЛИСТА ===\n"
         context += "ВНИМАНИЕ: Используй ТОЛЬКО эти цены и проценты, не придумывай свои значения!\n"
+        PRAIS_URL = "http://clck.ru/jrimp"
         def format_prices(product):
             prices = []
             price_map = [
@@ -324,15 +327,25 @@ def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats
                 else:
                     prices.append(f"• {vol} мл — Цена недоступна")
             return "\n".join(prices)
-        def get_top_variant(variants):
+        def get_top_variant(variants, key):
             if not variants:
                 return None
-            top = max(variants, key=lambda v: v.get('popularity_raw', 0))
+            top = max(variants, key=key)
             return top
+        # Для ранга по популярности
+        def get_rank(product, all_products, key):
+            sorted_products = sorted(all_products, key=key, reverse=True)
+            for idx, p in enumerate(sorted_products, 1):
+                if p['Бренд'] == product['Бренд'] and p['Аромат'] == product['Аромат'] and p['Фабрика'] == product['Фабрика'] and p['Качество'] == product['Качество']:
+                    return idx
+            return None
         # Поиск по запросу
         if query:
-            products = search_products(query, limit=5)
+            products = search_products(query, limit=None)
             if products:
+                # Для ранжирования по популярности
+                all_products_6m = get_top_products(sort_by='TOP LAST', limit=None)
+                all_products_all = get_top_products(sort_by='TOP ALL', limit=None)
                 context += f"\n🔍 НАЙДЕННЫЕ АРОМАТЫ ПО ЗАПРОСУ '{query}':\n"
                 for i, product in enumerate(products, 1):
                     brand = product.get('Бренд', 'N/A')
@@ -341,29 +354,39 @@ def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats
                     quality = product.get('Качество', 'N/A')
                     popularity_last = product.get('TOP LAST', 0)
                     popularity_all = product.get('TOP ALL', 0)
-                    context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last*100:.2f}%\n   📊 Популярность (всё время): {popularity_all*100:.2f}%\n   💰 Цены:\n{format_prices(product)}\n\n"
+                    rank_6m = get_rank(product, all_products_6m, lambda p: p.get('TOP LAST', 0))
+                    rank_all = get_rank(product, all_products_all, lambda p: p.get('TOP ALL', 0))
+                    context += f"{i}. <a href='{PRAIS_URL}'>{brand} - {aroma}</a>\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last*100:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all*100:.2f}% (№{rank_all})\n   💰 Цены:\n{format_prices(product)}\n\n"
                 # Если запрошена статистика по вариантам
                 if show_variants_stats and len(products) > 0:
                     aroma_name = products[0].get('Аромат', '')
-                    variants_stats = get_aroma_variants_stats(aroma_name)
-                    if variants_stats:
-                        top_variant = get_top_variant(variants_stats)
-                        context += f"\n📊 СТАТИСТИКА ПО ВАРИАНТАМ АРОМАТА '{aroma_name}':\n"
-                        for v in variants_stats:
-                            mark = " (самый популярный)" if top_variant and v['factory'] == top_variant['factory'] and v['quality'] == top_variant['quality'] else ""
-                            context += f"- {v['factory']} ({v['quality']}): {v['popularity_percent']:.1f}%{mark}\n"
-        # ТОП-5 популярных ароматов
-        top_products = get_top_products(sort_by='TOP LAST', limit=5)
-        if top_products:
-            context += "\n🔥 ТОП-5 ПОПУЛЯРНЫХ АРОМАТОВ (последние 6 месяцев):\n"
-            for i, product in enumerate(top_products, 1):
+                    variants = [p for p in products if p.get('Аромат', '').strip().lower() == aroma_name.strip().lower()]
+                    # Суммы для нормировки
+                    sum_last = sum(p.get('TOP LAST', 0) for p in variants)
+                    sum_all = sum(p.get('TOP ALL', 0) for p in variants)
+                    # Найти топ-вариант по 6 мес
+                    top_variant = get_top_variant(variants, lambda p: p.get('TOP LAST', 0))
+                    context += f"\n📊 Статистика по вариантам аромата '{aroma_name}':\n"
+                    for v in variants:
+                        percent_last = (v.get('TOP LAST', 0) / sum_last * 100) if sum_last else 0
+                        percent_all = (v.get('TOP ALL', 0) / sum_all * 100) if sum_all else 0
+                        mark = " (самый популярный)" if top_variant and v['Фабрика'] == top_variant['Фабрика'] and v['Качество'] == top_variant['Качество'] else ""
+                        context += f"- {v['Фабрика']} ({v['Качество']}): {percent_last:.1f}% за 6 мес, {percent_all:.1f}% за всё время{mark}\n"
+        # ТОП-ароматы (весь прайс)
+        all_products_6m = get_top_products(sort_by='TOP LAST', limit=None)
+        all_products_all = get_top_products(sort_by='TOP ALL', limit=None)
+        if all_products_6m:
+            context += "\n🔥 ВСЕ ПОПУЛЯРНЫЕ АРОМАТЫ (последние 6 месяцев):\n"
+            for i, product in enumerate(all_products_6m, 1):
                 brand = product.get('Бренд', 'N/A')
                 aroma = product.get('Аромат', 'N/A')
                 factory = product.get('Фабрика', 'N/A')
                 quality = product.get('Качество', 'N/A')
                 popularity_last = product.get('TOP LAST', 0)
                 popularity_all = product.get('TOP ALL', 0)
-                context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last*100:.2f}%\n   📊 Популярность (всё время): {popularity_all*100:.2f}%\n   💰 Цены:\n{format_prices(product)}\n\n"
+                rank_6m = i
+                rank_all = get_rank(product, all_products_all, lambda p: p.get('TOP ALL', 0))
+                context += f"{i}. <a href='{PRAIS_URL}'>{brand} - {aroma}</a>\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last*100:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all*100:.2f}% (№{rank_all})\n   💰 Цены:\n{format_prices(product)}\n\n"
         # Информация о фабриках
         context += "\n🏭 ДОСТУПНЫЕ ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN, MANE\n"
         context += "⭐ КАЧЕСТВА: TOP > Q1 > Q2\n"
@@ -804,6 +827,7 @@ async def ask_deepseek(question):
             "15. Когда даешь ссылку в кнопку, если это связано не с товаром, то красиво её называй, отражая, что там внутри при переходе. Не пиши некрасивые названия по типу: тут или вот\n"
             "16. В ответах не использовать слова DELUXE, у нас есть только три категории фабрик?\n"
             "17. Используй только те цены и проценты, которые указаны в контексте. Не придумывай свои значения.\n"
+            "18. Если даёшь ссылку на прайс, она должна вести на http://clck.ru/jrimp. Не использовать ссылки на вопросы и ответы вместо прайса.\n"
         )
         
         url = "https://api.deepseek.com/v1/chat/completions"
