@@ -308,6 +308,7 @@ def get_aroma_variants_stats(aroma_name):
 def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats=False):
     """Создает СТРОГО СТРУКТУРИРОВАННЫЙ контекст из Excel данных для DeepSeek, с расчетом цен и статистикой вариантов"""
     try:
+        MAX_PRODUCTS_FOR_LLM = 20
         context = "\n=== АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ПРАЙС-ЛИСТА ===\n"
         context += "ВНИМАНИЕ: Используй ТОЛЬКО эти цены и проценты, не придумывай свои значения!\n"
         PRAIS_URL = "http://clck.ru/jrimp"
@@ -325,14 +326,13 @@ def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats
                     total = int(price_per_g * vol)
                     prices.append(f"• {vol} мл — {price_per_g}₽/мл = {total}₽")
                 else:
-                    prices.append(f"• {vol} мл — Цена недоступна")
+                    prices.append(f"• {vol} мл — Стоимость недоступна")
             return "\n".join(prices)
         def get_top_variant(variants, key):
             if not variants:
                 return None
             top = max(variants, key=key)
             return top
-        # Для ранга по популярности
         def get_rank(product, all_products, key):
             sorted_products = sorted(all_products, key=key, reverse=True)
             for idx, p in enumerate(sorted_products, 1):
@@ -342,11 +342,20 @@ def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats
         # Поиск по запросу
         if query:
             products = search_products(query, limit=None)
+            total_found = len(products)
+            if total_found > MAX_PRODUCTS_FOR_LLM:
+                context += f"\n⚠️ Найдено {total_found} ароматов, показываю только первые {MAX_PRODUCTS_FOR_LLM}. Уточните запрос для более точного результата.\n"
+                products = products[:MAX_PRODUCTS_FOR_LLM]
             if products:
-                # Для ранжирования по популярности
                 all_products_6m = get_top_products(sort_by='TOP LAST', limit=None)
                 all_products_all = get_top_products(sort_by='TOP ALL', limit=None)
-                context += f"\n🔍 НАЙДЕННЫЕ АРОМАТЫ ПО ЗАПРОСУ '{query}':\n"
+                # Группируем варианты по названию аромата
+                aroma_name = products[0].get('Аромат', '')
+                variants = [p for p in products if p.get('Аромат', '').strip().lower() == aroma_name.strip().lower()]
+                show_variants_block = len(variants) > 1
+                sum_last = sum(p.get('TOP LAST', 0) for p in variants)
+                sum_all = sum(p.get('TOP ALL', 0) for p in variants)
+                top_variant = get_top_variant(variants, lambda p: p.get('TOP LAST', 0))
                 for i, product in enumerate(products, 1):
                     brand = product.get('Бренд', 'N/A')
                     aroma = product.get('Аромат', 'N/A')
@@ -356,27 +365,23 @@ def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats
                     popularity_all = product.get('TOP ALL', 0)
                     rank_6m = get_rank(product, all_products_6m, lambda p: p.get('TOP LAST', 0))
                     rank_all = get_rank(product, all_products_all, lambda p: p.get('TOP ALL', 0))
-                    context += f"{i}. <a href='{PRAIS_URL}'>{brand} - {aroma}</a>\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last*100:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all*100:.2f}% (№{rank_all})\n   💰 Цены:\n{format_prices(product)}\n\n"
-                # Если запрошена статистика по вариантам
-                if show_variants_stats and len(products) > 0:
-                    aroma_name = products[0].get('Аромат', '')
-                    variants = [p for p in products if p.get('Аромат', '').strip().lower() == aroma_name.strip().lower()]
-                    # Суммы для нормировки
-                    sum_last = sum(p.get('TOP LAST', 0) for p in variants)
-                    sum_all = sum(p.get('TOP ALL', 0) for p in variants)
-                    # Найти топ-вариант по 6 мес
-                    top_variant = get_top_variant(variants, lambda p: p.get('TOP LAST', 0))
-                    context += f"\n📊 Статистика по вариантам аромата '{aroma_name}':\n"
-                    for v in variants:
-                        percent_last = (v.get('TOP LAST', 0) / sum_last * 100) if sum_last else 0
-                        percent_all = (v.get('TOP ALL', 0) / sum_all * 100) if sum_all else 0
-                        mark = " (самый популярный)" if top_variant and v['Фабрика'] == top_variant['Фабрика'] and v['Качество'] == top_variant['Качество'] else ""
-                        context += f"- {v['Фабрика']} ({v['Качество']}): {percent_last:.1f}% за 6 мес, {percent_all:.1f}% за всё время{mark}\n"
-        # ТОП-ароматы (весь прайс)
-        all_products_6m = get_top_products(sort_by='TOP LAST', limit=None)
-        all_products_all = get_top_products(sort_by='TOP ALL', limit=None)
+                    context += f"{i}. <a href='{PRAIS_URL}'>{brand} - {aroma}</a>\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last*100:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all*100:.2f}% (№{rank_all})\n"
+                    # Статистика по вариантам (если есть варианты)
+                    if show_variants_block and i == 1:
+                        context += f"📊 Статистика по вариантам аромата '{aroma_name}':\n"
+                        for v in variants:
+                            percent_last = (v.get('TOP LAST', 0) / sum_last * 100) if sum_last else 0
+                            percent_all = (v.get('TOP ALL', 0) / sum_all * 100) if sum_all else 0
+                            mark = " (самый популярный)" if top_variant and v['Фабрика'] == top_variant['Фабрика'] and v['Качество'] == top_variant['Качество'] else ""
+                            context += f"- {v['Фабрика']} ({v['Качество']}): {percent_last:.1f}% за 6 мес, {percent_all:.1f}% за всё время{mark}\n"
+                    # Отступ перед стоимостью
+                    context += "\n"
+                    context += f"💰 Стоимость:\n{format_prices(product)}\n\n"
+        # ТОП-ароматы (весь прайс, но с лимитом)
+        all_products_6m = get_top_products(sort_by='TOP LAST', limit=MAX_PRODUCTS_FOR_LLM)
+        all_products_all = get_top_products(sort_by='TOP ALL', limit=MAX_PRODUCTS_FOR_LLM)
         if all_products_6m:
-            context += "\n🔥 ВСЕ ПОПУЛЯРНЫЕ АРОМАТЫ (последние 6 месяцев):\n"
+            context += f"\n🔥 ТОП-{MAX_PRODUCTS_FOR_LLM} ПОПУЛЯРНЫХ АРОМАТОВ (последние 6 месяцев):\n"
             for i, product in enumerate(all_products_6m, 1):
                 brand = product.get('Бренд', 'N/A')
                 aroma = product.get('Аромат', 'N/A')
@@ -386,7 +391,7 @@ def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats
                 popularity_all = product.get('TOP ALL', 0)
                 rank_6m = i
                 rank_all = get_rank(product, all_products_all, lambda p: p.get('TOP ALL', 0))
-                context += f"{i}. <a href='{PRAIS_URL}'>{brand} - {aroma}</a>\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last*100:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all*100:.2f}% (№{rank_all})\n   💰 Цены:\n{format_prices(product)}\n\n"
+                context += f"{i}. <a href='{PRAIS_URL}'>{brand} - {aroma}</a>\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last*100:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all*100:.2f}% (№{rank_all})\n\n💰 Стоимость:\n{format_prices(product)}\n\n"
         # Информация о фабриках
         context += "\n🏭 ДОСТУПНЫЕ ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN, MANE\n"
         context += "⭐ КАЧЕСТВА: TOP > Q1 > Q2\n"
