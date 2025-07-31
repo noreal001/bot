@@ -245,32 +245,69 @@ def format_product_info(product, include_prices=True, for_chatgpt=True):
         # Добавляем ссылку из прайса, если она есть
         link = product.get('Ссылка', '')
         if link and not pd.isna(link) and str(link).strip():
-            info = f"🏷️ <a href='{link}'>{brand} - {aroma}</a>\n"
+            info = f"✨ <a href='{link}'>{brand} - {aroma}</a>\n"
         else:
-            info = f"🏷️ {brand} - {aroma}\n"
-        info += f"🏭 Фабрика: {factory}\n"
-        info += f"⭐ Качество: {quality}\n"
+            info = f"✨ {brand} - {aroma}\n"
+        info += f"   ⛵️ {factory} {quality}\n"
         if include_prices:
-            prices = []
-            price_ranges = [
-                ('30 GR', '30-49 мл'),
-                ('50 GR', '50-499 мл'),
-                ('500 GR', '500-999 мл'),
-                ('1 KG', '1000+ мл')
-            ]
-            for col, range_text in price_ranges:
-                price = product.get(col)
-                if price and not pd.isna(price):
-                    prices.append(f"{range_text}: {price}₽/мл")
-            if prices:
-                info += f"💰 Цены: {', '.join(prices)}\n"
+            # Показываем основную цену (50 GR как стандарт)
+            main_price = product.get('50 GR')
+            if main_price and not pd.isna(main_price):
+                info += f"\n💵 Стоимость:\n"
+                info += f"💧505 грамм = {int(main_price * 505)}₽ ({main_price}₽/GR)\n"
         # Статистика популярности
         top_last = product.get('TOP LAST')
         top_all = product.get('TOP ALL')
         if top_last and not pd.isna(top_last):
-            info += f"📈 Популярность (6 мес): {float(top_last):.2f}%\n"
+            info += f"   ⚡️ TOP LAST: {float(top_last):.2f}% (№{get_rank(product, get_top_products(sort_by='TOP LAST', limit=None), lambda p: p.get('TOP LAST', 0))})\n"
         if top_all and not pd.isna(top_all):
-            info += f"📊 Популярность (всё время): {float(top_all):.2f}%\n"
+            info += f"   🚀 TOP ALL: {float(top_all):.2f}% (№{get_rank(product, get_top_products(sort_by='TOP ALL', limit=None), lambda p: p.get('TOP ALL', 0))})\n"
+        
+        # Добавляем TOP VERSION (процентное соотношение по фабрикам и качеству)
+        aroma_name = product.get('Аромат', '')
+        if aroma_name and not pd.isna(aroma_name):
+            # Ищем все версии этого аромата
+            all_versions = [p for p in excel_data if p.get('Аромат', '').strip().lower() == aroma_name.strip().lower()]
+            if len(all_versions) > 1:  # Если есть больше одной версии
+                total_popularity = sum(p.get('TOP LAST', 0) for p in all_versions)
+                if total_popularity > 0:
+                    # Группируем по фабрикам и качеству
+                    factory_stats = {}
+                    for version in all_versions:
+                        factory = version.get('Фабрика', '')
+                        quality = version.get('Качество', '')
+                        popularity = version.get('TOP LAST', 0)
+                        key = f"{factory} {quality}"
+                        if key not in factory_stats:
+                            factory_stats[key] = 0
+                        factory_stats[key] += popularity
+                    
+                    # Формируем строку с процентами
+                    version_percents = []
+                    for factory_key, popularity in factory_stats.items():
+                        percent = (popularity / total_popularity) * 100
+                        version_percents.append(f"{factory_key}: {percent:.1f}%")
+                    
+                    if version_percents:
+                        info += f"   ⚔️ TOP VERSION: {' | '.join(version_percents)}\n"
+        
+        # Добавляем информацию о нотах
+        top_notes = product.get('Верхние ноты', '')
+        middle_notes = product.get('Средние ноты', '')
+        base_notes = product.get('Базовые ноты', '')
+        
+        if top_notes and not pd.isna(top_notes) and str(top_notes).strip():
+            info += f"🌱 Верхние ноты: {str(top_notes).strip()}\n"
+        if middle_notes and not pd.isna(middle_notes) and str(middle_notes).strip():
+            info += f"🌿 Средние ноты: {str(middle_notes).strip()}\n"
+        if base_notes and not pd.isna(base_notes) and str(base_notes).strip():
+            info += f"🍃 Базовые ноты: {str(base_notes).strip()}\n"
+        
+        # Добавляем информацию о бренде и стране
+        country = product.get('Страна', '')
+        if country and not pd.isna(country) and str(country).strip():
+            info += f"🇳🇱 Страна: {str(country).strip()}\n"
+        
         return info.strip()
     except Exception as e:
         logger.error(f"Error formatting product info: {e}")
@@ -363,16 +400,56 @@ def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_stats=
                     rank_6m = get_rank(product, all_products_6m, lambda p: p.get('TOP LAST', 0))
                     rank_all = get_rank(product, all_products_all, lambda p: p.get('TOP ALL', 0))
                                     # Используем ссылку из прайса, если она есть и валидна
-                link = product.get('Ссылка', '')
-                if link and not pd.isna(link) and str(link).strip() and str(link).strip().startswith('http'):
-                    aroma_url = str(link).strip()
-                else:
-                    # Не генерируем ссылку, если её нет в прайсе
-                    aroma_url = ""
-                    if brand != 'N/A' and aroma != 'N/A':
-                        context += f"{i}. <a href='{aroma_url}'>{brand} - {aroma}</a>\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all:.2f}% (№{rank_all})\n"
+                    link = product.get('Ссылка', '')
+                    if link and not pd.isna(link) and str(link).strip() and str(link).strip().startswith('http'):
+                        aroma_url = str(link).strip()
                     else:
-                        context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all:.2f}% (№{rank_all})\n"
+                        # Не генерируем ссылку, если её нет в прайсе
+                        aroma_url = ""
+                    
+                    if brand != 'N/A' and aroma != 'N/A':
+                        context += f"{i}. ✨ <a href='{aroma_url}'>{brand} - {aroma}</a>\n   ⛵️ {factory} {quality}\n   ⚡️ TOP LAST: {popularity_last:.2f}% (№{rank_6m})\n   🚀 TOP ALL: {popularity_all:.2f}% (№{rank_all})\n"
+                    else:
+                        context += f"{i}. ✨ {brand} - {aroma}\n   ⛵️ {factory} {quality}\n   ⚡️ TOP LAST: {popularity_last:.2f}% (№{rank_6m})\n   🚀 TOP ALL: {popularity_all:.2f}% (№{rank_all})\n"
+                    
+                    # Добавляем TOP VERSION (процентное соотношение по фабрикам и качеству)
+                    aroma_name = product.get('Аромат', '')
+                    if aroma_name and not pd.isna(aroma_name):
+                        all_versions = [p for p in excel_data if p.get('Аромат', '').strip().lower() == aroma_name.strip().lower()]
+                        if len(all_versions) > 1:
+                            total_popularity = sum(p.get('TOP LAST', 0) for p in all_versions)
+                            if total_popularity > 0:
+                                # Группируем по фабрикам и качеству
+                                factory_stats = {}
+                                for version in all_versions:
+                                    factory = version.get('Фабрика', '')
+                                    quality = version.get('Качество', '')
+                                    popularity = version.get('TOP LAST', 0)
+                                    key = f"{factory} {quality}"
+                                    if key not in factory_stats:
+                                        factory_stats[key] = 0
+                                    factory_stats[key] += popularity
+                                
+                                # Формируем строку с процентами
+                                version_percents = []
+                                for factory_key, popularity in factory_stats.items():
+                                    percent = (popularity / total_popularity) * 100
+                                    version_percents.append(f"{factory_key}: {percent:.1f}%")
+                                
+                                if version_percents:
+                                    context += f"   ⚔️ TOP VERSION: {' | '.join(version_percents)}\n"
+                    
+                    # Добавляем информацию о нотах
+                    top_notes = product.get('Верхние ноты', '')
+                    middle_notes = product.get('Средние ноты', '')
+                    base_notes = product.get('Базовые ноты', '')
+                    
+                    if top_notes and not pd.isna(top_notes) and str(top_notes).strip():
+                        context += f"   🌱 Верхние ноты: {str(top_notes).strip()}\n"
+                    if middle_notes and not pd.isna(middle_notes) and str(middle_notes).strip():
+                        context += f"   🌿 Средние ноты: {str(middle_notes).strip()}\n"
+                    if base_notes and not pd.isna(base_notes) and str(base_notes).strip():
+                        context += f"   🍃 Базовые ноты: {str(base_notes).strip()}\n"
                     # Статистика по вариантам (если есть варианты)
                     if show_variants_block and i == 1:
                         context += f"📊 Статистика по вариантам аромата '{aroma_name}':\n"
@@ -824,40 +901,26 @@ async def ask_chatgpt(question):
                 show_variants_stats = True
                 logger.info(f"  📊 Включена статистика по вариантам аромата '{search_query}'")
         
-        # Формируем базовый контекст
-        example_block = """
-ПРИМЕР ОТВЕТА:
-1. ✨<a href='https://bahur.store/search?q=Escentric+Molecules+Escentric+02'>Escentric Molecules - Escentric 02</a>
-   ⛵️ SELUZ TOP
-   ⚡️ TOP LAST: 0.24% (№1)
-   🚀 TOP ALL: 0.26% (№2)
-
-⚔️ TOP VERSION: ## cчитать общий процент за всё время и последние пол года
-🥥SELUZ - TOP: 55% 
-🍇EPS TOP: 30%
-🍒LUZI: 15%
-
-💵 Стоимость:
-💧505 грамм = 16 160₽ (32₽/GR)
-"""
-
-        example_notes = """
-ПРАВИЛА ОПИСАНИЯ НОТ:
-- 🌱 Верхние ноты: первые впечатления (5-15 минут)
-- 🌿 Средние ноты: основная композиция (15-60 минут)  
-- 🍃 Базовые ноты: финальные аккорды (1-8 часов)
-- ® Бренд: указывать только для оригинальных ароматов
-- 🇳🇱 Страна: указывать производителя
-- 🥀 Пол: мужской/женский/унисекс
-"""
-
         system_content = (
-            "Ты - Ai-Медвежонок (менеджер по продажам), эксперт по ароматам BAHUR. "
+            "Ты - Ai-Медвежонок (менеджер по продажам), эксперт по ароматам от компании BAHUR. "
             "У тебя есть доступ к полному каталогу и актуальным ценам.\n"
             "Ты дружелюбный и общительный медвежонок, который любит помогать людям.\n"
-            "ОТВЕЧАЙ СТРОГО ПО ШАБЛОНУ:\n"
-            + example_block + "\n"
-            + example_notes + "\n"
+            "\nШАБЛОН ОТВЕТА:\n"
+            "✨[Бренд] [Аромат] (с ссылкой из прайса)\n" 
+            
+            "® Бренд: [данные из прайса]\n"
+            "🇳🇱 Страна: [данные из прайса]\n"
+            
+            "🌱 Верхние ноты: [данные из прайса]\n"
+            "🌿 Средние ноты: [данные из прайса]\n"
+            "🍃 Базовые ноты: [данные из прайса]\n"
+            
+            "⚡️ TOP LAST: [реальный % из прайса]% (№[ранг])\n"
+            "🚀 TOP ALL: [реальный % из прайса]% (№[ранг])\n"
+            "⚔️ TOP VERSION: [EPS TOP: 55% | LUZI TOP: 30% | SELUZ TOP: 15%] (только если есть >1 версии)\n"
+            
+            "💵 Стоимость:\n"
+            "💧[объем] грамм = [цена]₽ ([цена за грамм]₽/GR)\n"
         )
         # Добавляем историю диалога
         history_block = ""
@@ -884,7 +947,6 @@ async def ask_chatgpt(question):
             "6. Если клиент спрашивает про цены - рассчитай точную стоимость для нужного объема\n"
             "7. Если есть подходящая ссылка из данных, обязательно включи её в ответ\n"
             "9. Отвечай на русском языке, с эмодзи, но БЕЗ markdown\n"
-            "10. Если вопрос не по теме ароматов - отвечай на него дружелюбно, а потом аккуратно спроси, что интересует в мире ароматов\n"
             "11. Когда вставляешь ссылку, используй HTML-формат: <a href='ССЫЛКА'>ТЕКСТ</a>\n"
             "12. При расчете цен учитывай объемные скидки согласно прайс-листу, посчитай но скажи им пройти по ссылке на товар или в магазин\n"
             "13. Упоминай фабрику и качество товара когда это релевантно\n"
@@ -894,7 +956,7 @@ async def ask_chatgpt(question):
             "19. ВАЖНО: никогда не упоминай никакие ароматы которых нет у нас в прайсе\n"
             "20  Пиши коротко, красиво, ясно, со стилем, используй смайлы, твоя основа это данные которые есть в bahur_data.txt без фантазий и выдумок\n"
             "21. При поиске клиент может ошибаться и сказать или написать аромат и совпадение может быть не точным, оно может быть на 80%, но ты должен найти его и ответить на вопрос клиента\n"
-            "22. Будь дружелюбным и общительным. Если человек спрашивает не про ароматы - отвечай на его вопрос, а потом аккуратно спроси, что его интересует в мире ароматов\n"
+            "22. Будь дружелюбным и общительным. Если человек спрашивает не про ароматы - отвечай на его вопрос нормально, но старайся держаться темы разговоров о парфюмерном бизнесе\n"
             "23. Не давай сразу ссылки на ароматы, если человек не спрашивал конкретно про них\n"
         )
         
