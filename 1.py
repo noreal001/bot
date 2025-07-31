@@ -2713,3 +2713,120 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     print(f"[INFO] Starting uvicorn on 0.0.0.0:{port}")
     uvicorn.run("1:app", host="0.0.0.0", port=port)
+
+def format_aroma_response_improved(product, include_prices=True):
+    """Улучшенная функция форматирования ответа об аромате с правильными отступами"""
+    try:
+        brand = product.get('Бренд', 'N/A')
+        aroma_raw = product.get('Аромат', 'N/A')
+        aroma = format_aroma_name(aroma_raw)
+        factory = product.get('Фабрика', 'N/A')
+        quality = product.get('Качество', 'N/A')
+        
+        # Получаем ссылку (гиперссылка или обычная)
+        hyperlink = product.get('Гиперссылка', '')
+        link = product.get('Ссылка', '')
+        aroma_url = ""
+        
+        if hyperlink and not pd.isna(hyperlink) and str(hyperlink).strip().startswith('http'):
+            aroma_url = str(hyperlink).strip()
+        elif link and not pd.isna(link) and str(link).strip().startswith('http'):
+            aroma_url = str(link).strip()
+        
+        # Формируем ответ с правильными отступами
+        response = ""
+        
+        # Название аромата
+        if aroma_url:
+            response += f"✨ <a href='{aroma_url}'>{brand} {aroma}</a>\n\n"
+        else:
+            response += f"✨ {brand} {aroma}\n\n"
+        
+        # Бренд и страна
+        response += f"® Бренд: {brand}\n"
+        country = product.get('Страна', '')
+        country_emoji = get_country_emoji(country)
+        if country and not pd.isna(country) and str(country).strip():
+            response += f"{country_emoji} Страна: {str(country).strip()}\n"
+        else:
+            response += f"{country_emoji} Страна: Не указана\n"
+        
+        response += "\n"
+        
+        # Ноты (из прайса, не из API)
+        top_notes = product.get('Верхние ноты', '')
+        middle_notes = product.get('Средние ноты', '')
+        base_notes = product.get('Базовые ноты', '')
+        
+        if top_notes and not pd.isna(top_notes) and str(top_notes).strip():
+            response += f"🌱 Верхние ноты: {str(top_notes).strip()}\n"
+        else:
+            response += f"🌱 Верхние ноты: Не указаны\n"
+            
+        if middle_notes and not pd.isna(middle_notes) and str(middle_notes).strip():
+            response += f"🌿 Средние ноты: {str(middle_notes).strip()}\n"
+        else:
+            response += f"🌿 Средние ноты: Не указаны\n"
+            
+        if base_notes and not pd.isna(base_notes) and str(base_notes).strip():
+            response += f"🍃 Базовые ноты: {str(base_notes).strip()}\n"
+        else:
+            response += f"🍃 Базовые ноты: Не указаны\n"
+        
+        response += "\n"
+        
+        # Популярность
+        top_last = product.get('TOP LAST', 0)
+        top_all = product.get('TOP ALL', 0)
+        if top_last and not pd.isna(top_last):
+            response += f"⚡️ TOP LAST: {float(top_last):.2f}% (№{get_rank(product, get_top_products(sort_by='TOP LAST', limit=None), lambda p: p.get('TOP LAST', 0))})\n"
+        if top_all and not pd.isna(top_all):
+            response += f"🚀 TOP ALL: {float(top_all):.2f}% (№{get_rank(product, get_top_products(sort_by='TOP ALL', limit=None), lambda p: p.get('TOP ALL', 0))})\n"
+        
+        response += "\n"
+        
+        # VERSION (если есть варианты)
+        aroma_name = product.get('Аромат', '')
+        if aroma_name and not pd.isna(aroma_name):
+            all_versions = [p for p in excel_data if p.get('Аромат', '').strip().lower() == aroma_name.strip().lower()]
+            if len(all_versions) > 1:
+                total_popularity = sum(p.get('TOP LAST', 0) for p in all_versions)
+                if total_popularity > 0:
+                    factory_stats = {}
+                    for version in all_versions:
+                        factory = version.get('Фабрика', '')
+                        quality = version.get('Качество', '')
+                        popularity = version.get('TOP LAST', 0)
+                        key = f"{factory} {quality}"
+                        if key not in factory_stats:
+                            factory_stats[key] = 0
+                        factory_stats[key] += popularity
+                    
+                    version_percents = []
+                    for factory_key, popularity in factory_stats.items():
+                        percent = (popularity / total_popularity) * 100
+                        version_percents.append(f"{factory_key}: {percent:.2f}%")
+                    
+                    if version_percents:
+                        response += f"♾️ VERSION: {' | '.join(version_percents)}\n\n"
+        
+        # Стоимость
+        if include_prices:
+            response += f"💵 Стоимость:\n"
+            price_ranges = [
+                ('30 GR', 30, '30 грамм'),
+                ('50 GR', 50, '50 грамм'),
+                ('500 GR', 500, '500 грамм'),
+                ('1 KG', 1000, '1000 грамм')
+            ]
+            for col, volume, volume_text in price_ranges:
+                price_per_g = product.get(col)
+                if price_per_g and not pd.isna(price_per_g):
+                    total_price = int(price_per_g * volume)
+                    response += f"💧{volume_text} = {total_price}₽ ({price_per_g}₽ - за 1 грамм)\n"
+        
+        return response.strip()
+        
+    except Exception as e:
+        logger.error(f"Error formatting aroma response: {e}")
+        return f"❌ Ошибка форматирования данных о продукте"
