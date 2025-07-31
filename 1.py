@@ -318,25 +318,8 @@ def format_product_info(product, include_prices=True, for_chatgpt=True):
         base_notes = product.get('Базовые ноты', '')
         country = product.get('Страна', '')
         
-        # Если ноты или страна не указаны в прайсе, пробуем получить через API
-        if (not top_notes or pd.isna(top_notes) or not str(top_notes).strip()) or \
-           (not country or pd.isna(country) or not str(country).strip()):
-            try:
-                api_data = await get_notes_from_api(f"{brand} {aroma}")
-                if api_data:
-                    if not top_notes or pd.isna(top_notes) or not str(top_notes).strip():
-                        top_notes = api_data.get("top_notes", "")
-                    if not middle_notes or pd.isna(middle_notes) or not str(middle_notes).strip():
-                        middle_notes = api_data.get("middle_notes", "")
-                    if not base_notes or pd.isna(base_notes) or not str(base_notes).strip():
-                        base_notes = api_data.get("base_notes", "")
-                    if not country or pd.isna(country) or not str(country).strip():
-                        country = api_data.get("country", "")
-                    # Если ссылки нет в прайсе, берем из API
-                    if not link or pd.isna(link) or not str(link).strip() or not str(link).strip().startswith('http'):
-                        link = api_data.get("link", "")
-            except Exception as e:
-                logger.error(f"Error getting API data: {e}")
+        # Если ноты или страна не указаны в прайсе, оставляем как есть
+        # API вызов убран, так как функция не используется в коде
         
         # Отображаем ноты
         if top_notes and not pd.isna(top_notes) and str(top_notes).strip():
@@ -396,7 +379,7 @@ def get_aroma_variants_stats(aroma_name):
         })
     return result
 
-def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_stats=False):
+async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_stats=False):
     """Создает СТРОГО СТРУКТУРИРОВАННЫЙ контекст из Excel данных для ChatGPT, с расчетом цен и статистикой вариантов"""
     try:
         MAX_PRODUCTS_FOR_LLM = 20
@@ -496,17 +479,60 @@ def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_stats=
                                 if version_percents:
                                     context += f"   ⚔️ TOP VERSION: {' | '.join(version_percents)}\n"
                     
-                    # Добавляем информацию о нотах
+                    # Добавляем информацию о нотах и стране
                     top_notes = product.get('Верхние ноты', '')
                     middle_notes = product.get('Средние ноты', '')
                     base_notes = product.get('Базовые ноты', '')
+                    country = product.get('Страна', '')
                     
+                    # Если ноты или страна не указаны в прайсе, пробуем получить через API
+                    if (not top_notes or pd.isna(top_notes) or not str(top_notes).strip()) or \
+                       (not country or pd.isna(country) or not str(country).strip()):
+                        try:
+                            api_data = await get_notes_from_api(f"{brand} {aroma}")
+                            if api_data:
+                                if not top_notes or pd.isna(top_notes) or not str(top_notes).strip():
+                                    top_notes = api_data.get("top_notes", "")
+                                if not middle_notes or pd.isna(middle_notes) or not str(middle_notes).strip():
+                                    middle_notes = api_data.get("middle_notes", "")
+                                if not base_notes or pd.isna(base_notes) or not str(base_notes).strip():
+                                    base_notes = api_data.get("base_notes", "")
+                                if not country or pd.isna(country) or not str(country).strip():
+                                    country = api_data.get("country", "")
+                                # Если ссылки нет в прайсе, берем из API
+                                if not aroma_url or aroma_url == "":
+                                    api_link = api_data.get("link", "")
+                                    if api_link and api_link.startswith('http'):
+                                        aroma_url = api_link
+                        except Exception as e:
+                            logger.error(f"Error getting API data: {e}")
+                    
+                    # Отображаем ноты
                     if top_notes and not pd.isna(top_notes) and str(top_notes).strip():
                         context += f"   🌱 Верхние ноты: {str(top_notes).strip()}\n"
+                    else:
+                        context += f"   🌱 Верхние ноты: Не указаны\n"
                     if middle_notes and not pd.isna(middle_notes) and str(middle_notes).strip():
                         context += f"   🌿 Средние ноты: {str(middle_notes).strip()}\n"
+                    else:
+                        context += f"   🌿 Средние ноты: Не указаны\n"
                     if base_notes and not pd.isna(base_notes) and str(base_notes).strip():
                         context += f"   🍃 Базовые ноты: {str(base_notes).strip()}\n"
+                    else:
+                        context += f"   🍃 Базовые ноты: Не указаны\n"
+                    
+                    # Добавляем пустую строку после нот
+                    context += "\n"
+                    
+                    # Отображаем страну с эмоджи
+                    country_emoji = get_country_emoji(country)
+                    if country and not pd.isna(country) and str(country).strip():
+                        context += f"   {country_emoji} Страна: {str(country).strip()}\n"
+                    else:
+                        context += f"   {country_emoji} Страна: Не указана\n"
+                    
+                    # Добавляем пустую строку после страны
+                    context += "\n"
                     # Статистика по вариантам (если есть варианты)
                     if show_variants_block and i == 1:
                         context += f"📊 Статистика по вариантам аромата '{aroma_name}':\n"
@@ -988,7 +1014,7 @@ async def ask_chatgpt(question):
         # Добавляем Excel данные если нужно
         if needs_excel:
             logger.info(f"  📊 Загружаем данные из Excel таблицы...")
-            excel_context = get_excel_context_for_chatgpt(search_query, volume_ml=volume_ml, show_variants_stats=show_variants_stats)
+            excel_context = await get_excel_context_for_chatgpt(search_query, volume_ml=volume_ml, show_variants_stats=show_variants_stats)
             system_content += excel_context
             excel_context_length = len(excel_context)
             logger.info(f"  📈 КОНТЕКСТ ИЗ EXCEL: {excel_context_length} символов")
