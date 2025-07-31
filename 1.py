@@ -134,7 +134,7 @@ def load_excel_data():
             return None
 
 def normalize_name(name):
-    return str(name).lower().replace('-', '').replace('’', '').replace("'", '').replace(' ', '')
+    return str(name).lower().replace('-', '').replace('' ', '').replace("'", '').replace(' ', '')
 
 def search_products(query, limit=None):
     global excel_data
@@ -622,7 +622,9 @@ def start_weekly_scheduler():
 TOKEN = os.getenv('TOKEN')
 BASE_WEBHOOK_URL = os.getenv('WEBHOOK_BASE_URL')
 WEBHOOK_PATH = "/webhook/ai-bear-123456"
-OPENAI_API = "REMOVED"
+OPENAI_API = os.getenv('OPENAI_API_KEY')
+if not OPENAI_API:
+    raise RuntimeError("OPENAI_API_KEY environment variable not set! Please set it in your environment.")
 
 # --- FastAPI app ---
 print('=== [LOG] FastAPI app создаётся ===')
