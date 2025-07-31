@@ -145,7 +145,7 @@ def load_excel_data():
             return None
 
 def normalize_name(name):
-    return str(name).lower().replace('-', '').replace('’', '').replace("'", '').replace(' ', '')
+    return str(name).lower().replace('-', '').replace('' ', '').replace("'", '').replace(' ', '')
 
 def search_products(query, limit=None):
     global excel_data
@@ -493,8 +493,8 @@ async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_
                                 for factory_key, popularity in factory_stats.items():
                                     percent = (popularity / total_popularity) * 100
                                     version_percents.append(f"{factory_key}: {percent:.1f}%")
-                                
-                                                    if version_percents:
+                    
+                    if version_percents:
                         context += f"   ♾️ VERSION: {' | '.join(version_percents)}\n"
                     
                     # Добавляем информацию о нотах и стране
