@@ -57,13 +57,13 @@ def load_bahur_data():
 # --- База данных для пользователей и лимитов ---
 def init_database():
     conn = sqlite3.connect('bot_users.db')
-    cursor = conn.cursor()
-    
+        cursor = conn.cursor()
+        
     # Таблица пользователей
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
             first_name TEXT,
             last_name TEXT,
             registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -79,9 +79,9 @@ def init_database():
             FOREIGN KEY (user_id) REFERENCES users (user_id)
         )
     """)
-    
-    conn.commit()
-    conn.close()
+        
+        conn.commit()
+        conn.close()
 
 # Инициализируем базу данных
 init_database()
@@ -246,7 +246,7 @@ def schedule_weekly_messages():
                 send_weekly_message()
                 # Ждем час, чтобы не отправить сообщение несколько раз
                 time.sleep(3600)
-            else:
+        else:
                 # Проверяем каждую минуту
                 time.sleep(60)
     
@@ -519,6 +519,9 @@ def is_likely_note(text):
 
 # --- Webhook для сообщений ---
 @app.post("/webhook")
+@app.post("/webhook/ai-bear-123456")
+async def telegram_webhook_ai_bear(request: Request):
+    return await telegram_webhook_impl(request)
 async def telegram_webhook_impl(request: Request):
     try:
         data = await request.json()
@@ -620,7 +623,7 @@ async def telegram_webhook_impl(request: Request):
                         if len(fragrances) > 10:
                             response_text += f"... и ещё {len(fragrances) - 10} ароматов\n"
                         
-                    else:
+                else:
                         response_text = f"😔 К сожалению, не найдено ароматов с нотой '{text}'"
                     
                     # Создаем кнопки возврата
@@ -636,8 +639,8 @@ async def telegram_webhook_impl(request: Request):
                     
                     # Сбрасываем состояние
                     set_user_state(user_id, None)
-                    return {"ok": True}
-                
+                        return {"ok": True}
+                    
                 # Автоматическое определение запроса ноты
                 elif is_likely_note(text):
                     # Проверяем лимит запросов
@@ -647,8 +650,8 @@ async def telegram_webhook_impl(request: Request):
                             "Попробуйте завтра или используйте другие функции бота! 🐾"
                         )
                         await telegram_send_message(chat_id, limit_message)
-                        return {"ok": True}
-                    
+                                return {"ok": True}
+                            
                     logger.info(f"[AUTO-NOTE] Auto-detected note query: {text}")
                     
                     # Отправляем сообщение о начале поиска
@@ -675,7 +678,7 @@ async def telegram_webhook_impl(request: Request):
                         if len(fragrances) > 10:
                             response_text += f"... и ещё {len(fragrances) - 10} ароматов\n"
                         
-                    else:
+                                    else:
                         response_text = f"😔 К сожалению, не найдено ароматов с нотой '{text}'"
                     
                     # Создаем кнопки возврата
@@ -691,7 +694,7 @@ async def telegram_webhook_impl(request: Request):
                     return {"ok": True}
                 
                 # Если нет активного состояния, показываем меню
-                else:
+                    else:
                     greeting = greet()
                     await telegram_send_message(chat_id, greeting["text"], greeting["reply_markup"])
                     return {"ok": True}
@@ -719,7 +722,7 @@ async def telegram_webhook_impl(request: Request):
                     "📊 Лимит: 100 запросов в сутки"
                 )
                 buttons = {
-                    "inline_keyboard": [
+                            "inline_keyboard": [
                         [{"text": "🏠 Главное меню", "callback_data": "main_menu"}]
                     ]
                 }
@@ -733,7 +736,7 @@ async def telegram_webhook_impl(request: Request):
                     "📊 Лимит: 100 запросов в сутки"
                 )
                 buttons = {
-                    "inline_keyboard": [
+                            "inline_keyboard": [
                         [{"text": "🏠 Главное меню", "callback_data": "main_menu"}]
                     ]
                 }
@@ -741,9 +744,9 @@ async def telegram_webhook_impl(request: Request):
                 set_user_state(user_id, "awaiting_note_search")
         
         logger.info("=== WEBHOOK COMPLETED SUCCESSFULLY ===")
-        return {"ok": True}
+                    return {"ok": True}
         
-    except Exception as e:
+            except Exception as e:
         logger.error(f"Webhook error: {e}\n{traceback.format_exc()}")
         return {"error": str(e)}
 
