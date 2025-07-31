@@ -399,7 +399,7 @@ async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_
                 price_per_g = product.get(col)
                 if price_per_g and not pd.isna(price_per_g):
                     total = int(price_per_g * vol)
-                    prices.append(f"💧{vol} грамм = {total}₽ (цена - {price_per_g}₽ за грамм)")
+                    prices.append(f"💧{vol} грамм = {total}₽ ({price_per_g}₽ - за 1 грамм)")
                 else:
                     prices.append(f"• {vol} мл — Стоимость недоступна")
             return "\n".join(prices)
@@ -450,9 +450,13 @@ async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_
                         aroma_url = ""
                     
                     if brand != 'N/A' and aroma != 'N/A':
-                        context += f"{i}. ✨ <a href='{aroma_url}'>{brand} - {aroma}</a>\n   ⛵️ {factory} {quality}\n   ⚡️ TOP LAST: {popularity_last:.2f}% (№{rank_6m})\n   🚀 TOP ALL: {popularity_all:.2f}% (№{rank_all})\n\n"
+                        context += f"✨{brand} - {aroma}\n\n"
                     else:
-                        context += f"{i}. ✨ {brand} - {aroma}\n   ⛵️ {factory} {quality}\n   ⚡️ TOP LAST: {popularity_last:.2f}% (№{rank_6m})\n   🚀 TOP ALL: {popularity_all:.2f}% (№{rank_all})\n\n"
+                        context += f"✨{brand} - {aroma}\n\n"
+                    
+                    # Добавляем популярность
+                    context += f"⚡️ TOP LAST: {popularity_last:.0f}% (№{rank_6m})\n"
+                    context += f"🚀 TOP ALL: {popularity_all:.0f}% (№{rank_all})\n\n"
                     
                     # Добавляем TOP VERSION (процентное соотношение по фабрикам и качеству)
                     aroma_name = product.get('Аромат', '')
@@ -526,12 +530,13 @@ async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_
                     # Добавляем пустую строку после нот
                     context += "\n"
                     
-                    # Отображаем страну с эмоджи
+                    # Отображаем бренд и страну
+                    context += f"® Бренд: {brand}\n"
                     country_emoji = get_country_emoji(country)
                     if country and not pd.isna(country) and str(country).strip():
-                        context += f"   {country_emoji} Страна: {str(country).strip()}\n"
+                        context += f"{country_emoji} Страна: {str(country).strip()}\n"
                     else:
-                        context += f"   {country_emoji} Страна: Не указана\n"
+                        context += f"{country_emoji} Страна: Не указана\n"
                     
                     # Добавляем пустую строку после страны
                     context += "\n"
@@ -545,7 +550,7 @@ async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_
                             context += f"- {v['Фабрика']} ({v['Качество']}): {percent_last:.1f}% за 6 мес, {percent_all:.1f}% за всё время{mark}\n"
                     # Отступ перед стоимостью
                     context += "\n"
-                    context += f"💰 Стоимость:\n{format_prices(product)}\n\n"
+                    context += f"💵 Стоимость:\n{format_prices(product)}\n\n"
         # ТОП-ароматы (весь прайс, но с лимитом)
         all_products_6m = get_top_products(sort_by='TOP LAST', limit=MAX_PRODUCTS_FOR_LLM)
         all_products_all = get_top_products(sort_by='TOP ALL', limit=MAX_PRODUCTS_FOR_LLM)
@@ -572,7 +577,7 @@ async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_
                 else:
                     context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   �� Популярность (6 мес): {popularity_last:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all:.2f}% (№{rank_all})\n\n💰 Стоимость:\n{format_prices(product)}\n\n"
         # Информация о фабриках
-        context += "\n🏭 ДОСТУПНЫЕ ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN, MANE\n"
+        context += "\n🏭 ДОСТУПНЫЕ ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN\n
         context += "⭐ КАЧЕСТВА: TOP > Q1 > Q2\n"
         context += "\n💰 ЦЕНОВЫЕ КАТЕГОРИИ:\n"
         context += "• 30-49 мл: цена из столбца '30 GR'\n"
