@@ -14,12 +14,6 @@ import asyncio
 import httpx
 import sys
 import uvicorn
-from datetime import datetime, timedelta
-import threading
-import time
-from dotenv import load_dotenv
-
-load_dotenv()
 
 print('=== [LOG] 1.py импортирован ===')
 nest_asyncio.apply()
@@ -28,7 +22,7 @@ nest_asyncio.apply()
 TOKEN = os.getenv('TOKEN')
 BASE_WEBHOOK_URL = os.getenv('WEBHOOK_BASE_URL')
 WEBHOOK_PATH = "/webhook/ai-bear-123456"
-OPENAI_API = os.getenv('OPENAI_API_KEY')
+DEEPSEEK_API = os.getenv('DEEPSEEK')
 
 # --- FastAPI app ---
 print('=== [LOG] FastAPI app создаётся ===')
@@ -109,27 +103,27 @@ class CallbackModel(BaseModel):
 # --- Утилиты ---
 def greet():
     return random.choice([
-    "Привет! 🐾✨ Я AI-Пантера — эксперт по ароматам BAHUR! Спрашивай про любые духи, масла, доставку или цены — я найду всё в нашем каталоге! 🌟",
-    "Здравствуй! 🐆💫 Готов помочь с выбором ароматов! Хочешь узнать про конкретные духи, масла, доставку или цены? Спрашивай — у меня есть полный каталог! ✨",
-    "Привет, ароматный друг! 🐾✨ Я знаю всё о духах BAHUR! Спрашивай про любые ароматы, масла, доставку — найду в каталоге и расскажу подробно! 🌟",
-    "Добро пожаловать! 🎯�� Я эксперт по ароматам BAHUR! Хочешь узнать про конкретные духи, масла, цены или доставку? Спрашивай — у меня есть все данные! ✨",
-    "Привет! 🌟🐆 Я AI-Пантера — знаю всё о духах BAHUR! Спрашивай про любые ароматы, масла, доставку или цены — найду в каталоге и помогу с выбором! 💫"
+    "Привет! 🐻✨ Я Ai-Медвежонок — эксперт по ароматам BAHUR! Спрашивай про любые духи, масла, доставку или цены — я найду всё в нашем каталоге! 🌟",
+    "Здравствуй! 🧸💫 Готов помочь с выбором ароматов! Хочешь узнать про конкретные духи, масла, доставку или цены? Спрашивай — у меня есть полный каталог! ✨",
+    "Привет, ароматный друг! 🐻‍❄️✨ Я знаю всё о духах BAHUR! Спрашивай про любые ароматы, масла, доставку — найду в каталоге и расскажу подробно! 🌟",
+    "Добро пожаловать! 🎯🐻 Я эксперт по ароматам BAHUR! Хочешь узнать про конкретные духи, масла, цены или доставку? Спрашивай — у меня есть все данные! ✨",
+    "Привет! 🌟🧸 Я Ai-Медвежонок — знаю всё о духах BAHUR! Спрашивай про любые ароматы, масла, доставку или цены — найду в каталоге и помогу с выбором! 💫"
     ])
 
-async def ask_chatgpt(question):
+async def ask_deepseek(question):
     try:
-        url = "https://api.openai.com/v1/chat/completions"
+        url = "https://api.deepseek.com/v1/chat/completions"
         headers = {
-            "Authorization": f"Bearer {OPENAI_API}",
+            "Authorization": f"Bearer {DEEPSEEK_API}",
             "Content-Type": "application/json"
         }
         data = {
-            "model": "gpt-4",
+            "model": "deepseek-chat",
             "messages": [
                 {
                     "role": "system",
                     "content": (
-                        "Ты - AI-Пантера (менеджер по продажам), эксперт по ароматам BAHUR. Используй ТОЛЬКО эти данные для ответа клиенту:\n"
+                        "Ты - Ai-Медвежонок (менеджер по продажам), эксперт по ароматам BAHUR. Используй ТОЛЬКО эти данные для ответа клиенту:\n"
                         f"{BAHUR_DATA}\n"
                         "ПРАВИЛА ОТВЕТОВ:\n"
                         "1. Отвечай КОНКРЕТНО на вопрос клиента, используя данные из каталога\n"
@@ -150,7 +144,7 @@ async def ask_chatgpt(question):
                     "content": f"{question}"
                 }
             ],
-            "temperature": 0.3
+            "temperature": 0.5
         }
         
         timeout = aiohttp.ClientTimeout(total=30)
@@ -385,7 +379,7 @@ async def process_voice_message(voice, chat_id):
                 text_content = await recognize_voice_content(file_content)
                 # Если результат не ошибка, отправляем в дипсик
                 if text_content and not any(err in text_content for err in ["Ошибка", "Не удалось", "недоступно"]):
-                    ai_answer = await ask_chatgpt(text_content)
+                    ai_answer = await ask_deepseek(text_content)
                     return ai_answer
                 else:
                     return text_content
@@ -435,7 +429,7 @@ async def process_voice_message_alternative(voice, chat_id):
                 # Пытаемся распознать речь без aifc
                 text_content = await recognize_voice_content(file_content)
                 if text_content and not any(err in text_content for err in ["Ошибка", "Не удалось", "недоступно"]):
-                    ai_answer = await ask_chatgpt(text_content)
+                    ai_answer = await ask_deepseek(text_content)
                     return ai_answer
                 else:
                     return text_content
@@ -623,7 +617,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                             text_content = await recognize_voice_content(file_content)
                             logger.info(f"[TG] Voice recognized text: {text_content}")
                             if text_content and not any(err in text_content for err in ["Ошибка", "Не удалось", "недоступно"]):
-                                ai_answer = await ask_chatgpt(text_content)
+                                ai_answer = await ask_deepseek(text_content)
                                 ai_answer = ai_answer.replace('*', '')
                                 buttons = extract_links_from_text(ai_answer)
                                 ai_answer_clean = remove_html_links(ai_answer)
@@ -645,7 +639,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     )
                     main_menu = {
                         "inline_keyboard": [
-                            [{"text": "🐆 AI-Пантера", "callback_data": "ai"}],
+                            [{"text": "🧸 Ai-Медвежонок", "callback_data": "ai"}],
                             [
                                 {"text": "🍦 Прайс", "url": "https://drive.google.com/file/d/1J70LlZwh6g7JOryDG2br-weQrYfv6zTc/view?usp=sharing"},
                                 {"text": "🍿 Магазин", "url": "https://www.bahur.store/m/"},
@@ -676,7 +670,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     )
                     main_menu = {
                         "inline_keyboard": [
-                            [{"text": "🐆 AI-Пантера", "callback_data": "ai"}],
+                            [{"text": "🧸 Ai-Медвежонок", "callback_data": "ai"}],
                             [
                                 {"text": "🍦 Прайс", "url": "https://drive.google.com/file/d/1J70LlZwh6g7JOryDG2br-weQrYfv6zTc/view?usp=sharing"},
                                 {"text": "🍿 Магазин", "url": "https://www.bahur.store/m/"},
@@ -701,7 +695,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     logger.info(f"[TG] Processing AI question for user {user_id}")
                     # Отправляем индикатор "печатает"
                     await send_typing_action(chat_id)
-                    ai_answer = await ask_chatgpt(text)
+                    ai_answer = await ask_deepseek(text)
                     ai_answer = ai_answer.replace('*', '')
                     
                     # Извлекаем ссылки из ответа и создаем кнопки
@@ -776,11 +770,11 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     # Если не похоже на ноту, предлагаем выбрать режим
                     menu = {
                         "inline_keyboard": [
-                            [{"text": "🐆 AI-Пантера", "callback_data": "ai"}],
+                            [{"text": "🧸 Ai-Медвежонок", "callback_data": "ai"}],
                             [{"text": "🍓 Ноты", "callback_data": "instruction"}]
                         ]
                     }
-                    success = await telegram_send_message(chat_id, "Выберите режим: 🐆 AI-Пантера или 🍓 Ноты", reply_markup=menu)
+                    success = await telegram_send_message(chat_id, "Выберите режим: 🧸 Ai-Медвежонок или 🍓 Ноты", reply_markup=menu)
                     if success:
                         logger.info(f"[TG] Sent menu to {chat_id}")
                     else:
@@ -926,7 +920,7 @@ async def handle_message(msg: MessageModel):
     try:
         if state == 'awaiting_ai_question':
             # Отправляем индикатор "печатает" (но здесь нет chat_id, поэтому пропускаем)
-            ai_answer = await ask_chatgpt(text)
+            ai_answer = await ask_deepseek(text)
             ai_answer = ai_answer.replace('*', '')
             return JSONResponse({"answer": ai_answer, "parse_mode": "HTML"})
         elif state == 'awaiting_note_search':
