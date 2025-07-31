@@ -433,7 +433,7 @@ def greet():
 
 def analyze_query_for_excel_data(question):
     """Анализирует запрос пользователя для определения нужности Excel данных"""
-    question_lower = question.lower()
+    question_lower = question.lower().strip()
     
     # Ключевые слова, указывающие на необходимость ценовой информации
     price_keywords = ['цена', 'стоимость', 'стоит', 'сколько', 'руб', 'рубл', 'дорог', 'дешев', 'прайс']
@@ -447,12 +447,6 @@ def analyze_query_for_excel_data(question):
     # Ключевые слова для фабрик и качества
     factory_keywords = ['eps', 'luzi', 'seluz', 'фабрика', 'качество', 'top', 'q1', 'q2']
     
-    # Определяем, какие типы ключевых слов найдены
-    found_price = [kw for kw in price_keywords if kw in question_lower]
-    found_search = [kw for kw in search_keywords if kw in question_lower]
-    found_stats = [kw for kw in stats_keywords if kw in question_lower]
-    found_factory = [kw for kw in factory_keywords if kw in question_lower]
-    
     # Проверяем на обычные разговоры (НЕ про ароматы)
     casual_keywords = ['как дела', 'как ты', 'привет', 'здравствуй', 'добрый день', 'добрый вечер', 'спасибо', 'хорошо', 'плохо', 'нормально', 'отлично', 'ужасно', 'погода', 'работа', 'семья', 'дети', 'муж', 'жена', 'друг', 'подруга', 'время', 'день', 'неделя', 'месяц', 'год', 'планы', 'мечты', 'цели', 'хобби', 'интересы', 'музыка', 'фильмы', 'книги', 'спорт', 'путешествия', 'еда', 'кухня', 'ресторан', 'кафе', 'магазин', 'покупки', 'деньги', 'бюджет', 'экономия', 'доходы', 'расходы', 'банк', 'кредит', 'ипотека', 'страхование', 'медицина', 'здоровье', 'врач', 'больница', 'лекарства', 'витамины', 'диета', 'похудение', 'фитнес', 'йога', 'бег', 'плавание', 'велосипед', 'лыжи', 'сноуборд', 'теннис', 'футбол', 'баскетбол', 'волейбол', 'хоккей', 'бокс', 'борьба', 'карате', 'дзюдо', 'самбо', 'аэробика', 'пилатес', 'стретчинг', 'массаж', 'сауна', 'баня', 'бассейн', 'спортзал', 'тренажеры', 'гантели', 'штанга', 'турник', 'брусья', 'скакалка', 'обруч', 'коврик', 'коврик для йоги', 'спортивная одежда', 'кроссовки', 'шорты', 'футболка', 'спортивные штаны', 'куртка', 'шапка', 'перчатки', 'носки', 'трусы', 'лифчик', 'бюстгальтер', 'трусики', 'плавки', 'купальник', 'парео', 'полотенце', 'мыло', 'шампунь', 'гель', 'дезодорант', 'зубная паста', 'щетка', 'расческа', 'зеркало', 'полотенце', 'простыня', 'одеяло', 'подушка', 'матрас', 'кровать', 'диван', 'кресло', 'стол', 'стул', 'шкаф', 'комод', 'тумбочка', 'лампа', 'светильник', 'люстра', 'торшер', 'настольная лампа', 'бра', 'спот', 'трек', 'подсветка', 'гирлянда', 'свечи', 'аромасвечи', 'благовония', 'ладан', 'мирра', 'сандал', 'пачули', 'лаванда', 'розмарин', 'мята', 'эвкалипт', 'чайное дерево', 'лимон', 'апельсин', 'грейпфрут', 'бергамот', 'лайм', 'мандарин', 'клементин', 'помело', 'кумкват', 'каламондин', 'юзу', 'судза', 'юдзу', 'каффир', 'макрут', 'кафрский лайм', 'кафрский лимон', 'кафрский апельсин', 'кафрский мандарин', 'кафрский клементин', 'кафрский помело', 'кафрский кумкват', 'кафрский каламондин', 'кафрский юзу', 'кафрский судза', 'кафрский юдзу', 'кафрский каффир', 'кафрский макрут', 'кафрский кафрский лайм', 'кафрский кафрский лимон', 'кафрский кафрский апельсин', 'кафрский кафрский мандарин', 'кафрский кафрский клементин', 'кафрский кафрский помело', 'кафрский кафрский кумкват', 'кафрский кафрский каламондин', 'кафрский кафрский юзу', 'кафрский кафрский судза', 'кафрский кафрский юдзу', 'кафрский кафрский каффир', 'кафрский кафрский макрут']
     
@@ -461,8 +455,30 @@ def analyze_query_for_excel_data(question):
     if is_casual:
         return False, ""  # Не загружаем Excel данные, но бот может дружелюбно ответить
     
+    # Определяем, какие типы ключевых слов найдены
+    found_price = [kw for kw in price_keywords if kw in question_lower]
+    found_search = [kw for kw in search_keywords if kw in question_lower]
+    found_stats = [kw for kw in stats_keywords if kw in question_lower]
+    found_factory = [kw for kw in factory_keywords if kw in question_lower]
+    
+    # НОВАЯ ЛОГИКА: Проверяем, может ли это быть поиск аромата
+    # Известные бренды и части названий ароматов
+    known_brands = ['ajmal', 'bvlgari', 'kilian', 'creed', 'tom ford', 'dior', 'chanel', 'ysl', 'afnan', 'nasomatto', 'escada', 'versace', 'gucci', 'prada', 'hermes', 'jo malone', 'byredo', 'le labo', 'serge lutens', 'amouage', 'xerjoff', 'roja', 'bond no 9', 'frederic malle', 'penhaligon', 'acqua di parma', 'profumum roma', 'nishane', 'mancera', 'montale', 'al haramain', 'rasasi', 'ard al zaafaran', 'swiss arabian', 'lattafa', 'maison alhambra', 'fragrance world', 'orientica', 'al rehab', 'nabeel', 'al ghadeer', 'al wataniah', 'al jazeera', 'al ain', 'al khaleej', 'al shams', 'al qamar', 'al najd', 'al hijaz', 'al yamamah', 'al bahrain', 'al kuwait', 'al qatar', 'al oman', 'al uae', 'al saudi', 'al emirates', 'al qatar', 'al bahrain', 'al kuwait', 'al oman', 'al uae', 'al saudi', 'al emirates']
+    
+    # Части названий ароматов (короткие слова, которые могут быть в названиях)
+    aroma_parts = ['afgano', 'oud', 'wood', 'rose', 'jasmine', 'vanilla', 'musk', 'amber', 'sandal', 'patchouli', 'lavender', 'bergamot', 'lemon', 'orange', 'grapefruit', 'mandarin', 'lime', 'peach', 'apricot', 'plum', 'cherry', 'strawberry', 'raspberry', 'blackberry', 'blueberry', 'cranberry', 'currant', 'gooseberry', 'elderberry', 'mulberry', 'loganberry', 'boysenberry', 'tayberry', 'wineberry', 'cloudberry', 'salmonberry', 'thimbleberry', 'dewberry', 'huckleberry', 'bilberry', 'whortleberry', 'lingonberry', 'cowberry', 'foxberry', 'partridgeberry', 'bearberry', 'crowberry', 'bogberry', 'marshberry', 'swampberry', 'moorberry', 'heathberry', 'heatherberry', 'bellberry', 'belladonna', 'deadly', 'nightshade', 'wolfberry', 'goji', 'boxthorn', 'matrimony', 'vine', 'thorn', 'bramble', 'blackthorn', 'sloe', 'bullace', 'damson', 'mirabelle', 'greengage', 'gage', 'prune', 'dried', 'plum', 'fresh', 'ripe', 'unripe', 'green', 'red', 'yellow', 'purple', 'black', 'white', 'pink', 'orange', 'brown', 'golden', 'silver', 'bronze', 'copper', 'brass', 'steel', 'iron', 'aluminum', 'titanium', 'zinc', 'nickel', 'chrome', 'platinum', 'palladium', 'rhodium', 'iridium', 'osmium', 'ruthenium', 'rhenium', 'tungsten', 'molybdenum', 'niobium', 'tantalum', 'vanadium', 'chromium', 'manganese', 'cobalt', 'cadmium', 'mercury', 'lead', 'bismuth', 'antimony', 'arsenic', 'selenium', 'tellurium', 'polonium', 'astatine', 'radon', 'francium', 'radium', 'actinium', 'thorium', 'protactinium', 'uranium', 'neptunium', 'plutonium', 'americium', 'curium', 'berkelium', 'californium', 'einsteinium', 'fermium', 'mendelevium', 'nobelium', 'lawrencium', 'rutherfordium', 'dubnium', 'seaborgium', 'bohrium', 'hassium', 'meitnerium', 'darmstadtium', 'roentgenium', 'copernicium', 'nihonium', 'flerovium', 'moscovium', 'livermorium', 'tennessine', 'oganesson']
+    
+    # Проверяем, содержит ли запрос известные бренды или части названий
+    found_brands = [brand for brand in known_brands if brand in question_lower]
+    found_aroma_parts = [part for part in aroma_parts if part in question_lower]
+    
+    # Если запрос короткий (1-3 слова) и содержит бренд или часть названия - это поиск
+    words = question_lower.split()
+    is_short_query = len(words) <= 3
+    is_search_query = (found_brands or found_aroma_parts) and is_short_query
+    
     needs_excel = any(keyword in question_lower for keyword in 
-                     price_keywords + search_keywords + stats_keywords + factory_keywords)
+                     price_keywords + search_keywords + stats_keywords + factory_keywords) or is_search_query
     
     # Логируем детали анализа
     if needs_excel:
@@ -475,22 +491,28 @@ def analyze_query_for_excel_data(question):
             logger.info(f"      📊 Статистические ключевые слова: {found_stats}")
         if found_factory:
             logger.info(f"      🏭 Фабричные ключевые слова: {found_factory}")
+        if found_brands:
+            logger.info(f"      🏷️ Найден бренд: {found_brands}")
+        if found_aroma_parts:
+            logger.info(f"      🌸 Найдена часть названия: {found_aroma_parts}")
+        if is_search_query:
+            logger.info(f"      🔍 Короткий поисковый запрос: '{question}'")
     
     # Извлекаем потенциальные названия ароматов для поиска
     search_query = ""
-    words = question_lower.split()
-    for i, word in enumerate(words):
-        if word in search_keywords and i + 1 < len(words):
-            # Берем следующие 1-3 слова как потенциальный запрос
-            search_query = " ".join(words[i+1:i+4])
-            break
-    
-    # Также ищем известные бренды в вопросе
-    common_brands = ['ajmal', 'bvlgari', 'kilian', 'creed', 'tom ford', 'dior', 'chanel', 'ysl', 'afnan']
-    found_brands = [brand for brand in common_brands if brand in question_lower]
-    if found_brands and not search_query:
+    if found_search:
+        for i, word in enumerate(words):
+            if word in search_keywords and i + 1 < len(words):
+                # Берем следующие 1-3 слова как потенциальный запрос
+                search_query = " ".join(words[i+1:i+4])
+                break
+    elif found_brands:
         search_query = found_brands[0]
-        logger.info(f"      🏷️ Найден бренд в запросе: {found_brands[0]}")
+    elif found_aroma_parts:
+        search_query = found_aroma_parts[0]
+    elif is_search_query:
+        # Если это короткий запрос без ключевых слов, используем весь запрос
+        search_query = question_lower.strip()
     
     return needs_excel, search_query
 
@@ -517,51 +539,23 @@ async def ask_chatgpt(question):
         
         # --- Новый блок: определение необходимости статистики по вариантам ---
         show_variants_stats = False
-        if needs_excel and search_query:
-            # Если найдено несколько вариантов одного аромата, показываем статистику
-            products = search_products(search_query, limit=10)
-            aroma_names = set(p['Аромат'].strip().lower() for p in products)
-            if len(products) > 1 and len(aroma_names) == 1:
-                show_variants_stats = True
-                logger.info(f"  📊 Включена статистика по вариантам аромата '{search_query}'")
+        # Убрано: поиск в Excel данных, так как они удалены
+        # Теперь бот работает только с bahur_data.txt
         
         system_content = (
             "Ты - AI-Пантера (менеджер по продажам), эксперт по ароматам от компании BAHUR. "
-            "У тебя есть доступ к полному каталогу и актуальным ценам.\n"
+            "У тебя есть доступ к информации из bahur_data.txt.\n"
             "Ты веселая, дружелюбная и общительная пантера, которая любит шутить и помогать людям! 🐾\n"
             "Всегда отвечай с юмором, используй смайлы и будь кратким и по делу.\n"
             "\n🚨 КРИТИЧЕСКИ ВАЖНО: ВСЕ данные о парфюмерии, заказах, доставке, ценах, условиях БЕРИ ТОЛЬКО из bahur_data.txt! НЕ используй никакие другие источники информации! Если информации нет в bahur_data.txt - говори что не знаешь, НЕ выдумывай! 🚨\n"
-            "\nШАБЛОН ОТВЕТА:\n"
-            "✨[Бренд] [Аромат] (с ссылкой из прайса)\n" 
-            
-            "® Бренд: [данные из прайса]\n"
-            "[флаг страны] Страна: [данные из прайса]\n"
-            
-            "🌱 Верхние ноты: [данные из прайса]\n"
-            "🌿 Средние ноты: [данные из прайса]\n"
-            "🍃 Базовые ноты: [данные из прайса]\n"
-            
-            "⚡️ TOP LAST: [реальный % из прайса]% (№[ранг])\n"
-            "🚀 TOP ALL: [реальный % из прайса]% (№[ранг])\n"
-            "♾️ VERSION: [фабрика качество: процент% | фабрика качество: процент%] (только если есть >1 версии)\n"
-            
-            "💵 Стоимость:\n"
-            "💧[объем] грамм = [цена]₽ ([цена за грамм]₽ - 1 грамм)\n"
         )
         # Добавляем историю диалога
         history_block = ""
         base_context_length = len(system_content)
         logger.info(f"  📄 БАЗОВЫЙ КОНТЕКСТ: {base_context_length} символов")
         
-        # Добавляем Excel данные если нужно
-        if needs_excel:
-            logger.info(f"  📊 Загружаем данные из Excel таблицы...")
-            excel_context = await get_excel_context_for_chatgpt(search_query, volume_ml=volume_ml, show_variants_stats=show_variants_stats)
-            system_content += excel_context
-            excel_context_length = len(excel_context)
-            logger.info(f"  📈 КОНТЕКСТ ИЗ EXCEL: {excel_context_length} символов")
-        else:
-            logger.info(f"  ℹ️ Excel данные не требуются для этого запроса")
+        # Убрано: загрузка Excel данных, так как они удалены
+        logger.info(f"  ℹ️ Excel данные не требуются для этого запроса")
         
         system_content += (
             "\nПРАВИЛА ОТВЕТОВ:\n"
