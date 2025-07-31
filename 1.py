@@ -95,10 +95,10 @@ def load_excel_data():
         
         # Конвертируем столбцы популярности (данные уже в процентах)
         if 'TOP LAST' in df.columns:
-            df['TOP LAST'] = pd.to_numeric(df['TOP LAST'], errors='coerce') / 100
+            df['TOP LAST'] = pd.to_numeric(df['TOP LAST'], errors='coerce')
         
         if 'TOP ALL' in df.columns:
-            df['TOP ALL'] = pd.to_numeric(df['TOP ALL'], errors='coerce') / 100
+            df['TOP ALL'] = pd.to_numeric(df['TOP ALL'], errors='coerce')
         
         # Очищаем пробелы в качестве
         if 'Качество' in df.columns:
@@ -262,9 +262,9 @@ def format_product_info(product, include_prices=True, for_chatgpt=True):
         top_last = product.get('TOP LAST')
         top_all = product.get('TOP ALL')
         if top_last and not pd.isna(top_last):
-            info += f"📈 Популярность (6 мес): {float(top_last)*100:.2f}%\n"
+            info += f"📈 Популярность (6 мес): {float(top_last):.2f}%\n"
         if top_all and not pd.isna(top_all):
-            info += f"📊 Популярность (всё время): {float(top_all)*100:.2f}%\n"
+            info += f"📊 Популярность (всё время): {float(top_all):.2f}%\n"
         return info.strip()
     except Exception as e:
         logger.error(f"Error formatting product info: {e}")
