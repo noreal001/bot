@@ -320,7 +320,7 @@ async def ask_chatgpt(question):
                 {"role": "user", "content": question}
             ],
             "temperature": 0.3,
-            "max_tokens": 4000
+            "max_tokens": 8000
         }
         
         timeout = httpx.Timeout(60.0)
