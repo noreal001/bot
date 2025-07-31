@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 import threading
 import time
 import pandas as pd
+from openpyxl import load_workbook
 
 print('=== [LOG] 1.py импортирован ===')
 nest_asyncio.apply()
@@ -35,6 +36,7 @@ def load_excel_data():
         import requests
         import io
         import ssl
+        from openpyxl import load_workbook
         
         # Отключаем проверку SSL для Google Sheets
         import urllib3
@@ -47,7 +49,34 @@ def load_excel_data():
         response = session.get(GOOGLE_SHEETS_URL, timeout=30)
         response.raise_for_status()
         
-        # Читаем Excel из памяти
+        # Сохраняем во временный файл для извлечения гиперссылок
+        import tempfile
+        import os
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+            tmp_file.write(response.content)
+            tmp_file_path = tmp_file.name
+        
+        try:
+            # Загружаем с помощью openpyxl для извлечения гиперссылок
+            wb = load_workbook(tmp_file_path)
+            ws = wb.active
+            
+            # Извлекаем гиперссылки из столбца B
+            hyperlinks = {}
+            for row in range(4, ws.max_row + 1):  # Начинаем с 4-й строки
+                cell = ws.cell(row=row, column=2)  # Столбец B
+                if cell.hyperlink:
+                    hyperlinks[row] = cell.hyperlink.target
+                    logger.info(f"Найдена гиперссылка в строке {row}: {cell.hyperlink.target}")
+            
+            wb.close()
+            
+        finally:
+            # Удаляем временный файл
+            os.unlink(tmp_file_path)
+        
+        # Читаем Excel из памяти через pandas
         df = pd.read_excel(io.BytesIO(response.content), header=2, skiprows=[3])
         
         # Очищаем данные
@@ -95,6 +124,17 @@ def load_excel_data():
         else:
             logger.warning(f"Not enough columns: {len(df.columns)}")
             raise Exception("Invalid column structure")
+        
+        # Добавляем гиперссылки к данным
+        if hyperlinks:
+            # Создаем столбец с гиперссылками
+            df['Гиперссылка'] = ''
+            for idx, row in df.iterrows():
+                # Индекс строки в Excel (начиная с 4-й строки)
+                excel_row = idx + 4
+                if excel_row in hyperlinks:
+                    df.at[idx, 'Гиперссылка'] = hyperlinks[excel_row]
+                    logger.info(f"Добавлена гиперссылка для строки {idx}: {hyperlinks[excel_row]}")
         
         # Конвертируем типы данных
         price_columns = ['30 GR', '50 GR', '500 GR', '1 KG']
@@ -444,16 +484,22 @@ async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_
                     popularity_all = product.get('TOP ALL', 0)
                     rank_6m = get_rank(product, all_products_6m, lambda p: p.get('TOP LAST', 0))
                     rank_all = get_rank(product, all_products_all, lambda p: p.get('TOP ALL', 0))
-                                    # Используем ссылку из прайса, если она есть и валидна
-                    link = product.get('Ссылка', '')
-                    logger.info(f"Ссылка для {brand} - {aroma}: {link}")
-                    if link and not pd.isna(link) and str(link).strip() and str(link).strip().startswith('http'):
-                        aroma_url = str(link).strip()
-                        logger.info(f"Используем ссылку из прайса: {aroma_url}")
+                                    # Используем гиперссылку из прайса, если она есть
+                    hyperlink = product.get('Гиперссылка', '')
+                    if hyperlink and not pd.isna(hyperlink) and str(hyperlink).strip() and str(hyperlink).strip().startswith('http'):
+                        aroma_url = str(hyperlink).strip()
+                        logger.info(f"Используем гиперссылку из прайса: {aroma_url}")
                     else:
-                        # Не генерируем ссылку, если её нет в прайсе
-                        aroma_url = ""
-                        logger.info(f"Ссылка из прайса не найдена для {brand} - {aroma}")
+                        # Проверяем обычную ссылку из прайса
+                        link = product.get('Ссылка', '')
+                        logger.info(f"Ссылка для {brand} - {aroma}: {link}")
+                        if link and not pd.isna(link) and str(link).strip() and str(link).strip().startswith('http'):
+                            aroma_url = str(link).strip()
+                            logger.info(f"Используем ссылку из прайса: {aroma_url}")
+                        else:
+                            # Не генерируем ссылку, если её нет в прайсе
+                            aroma_url = ""
+                            logger.info(f"Ссылка из прайса не найдена для {brand} - {aroma}")
                     
                     if brand != 'N/A' and aroma != 'N/A':
                         if aroma_url and aroma_url.startswith('http'):
