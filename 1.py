@@ -161,7 +161,7 @@ async def ask_chatgpt(question):
                 }
             ],
             "temperature": 0.3,
-            "max_tokens": 12000
+            "max_tokens": 3500
         }
         
         timeout = aiohttp.ClientTimeout(total=30)
