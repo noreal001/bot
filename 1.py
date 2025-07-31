@@ -339,8 +339,11 @@ def format_product_info(product, include_prices=True, for_chatgpt=True):
         # Добавляем пустую строку после нот
         info += "\n"
         
-        # Отображаем страну с эмоджи
+        # Отображаем бренд и страну
+        info += f"® Бренд: {brand}\n"
+        logger.info(f"Страна для {brand} - {aroma}: '{country}'")
         country_emoji = get_country_emoji(country)
+        logger.info(f"Эмоджи для страны '{country}': {country_emoji}")
         if country and not pd.isna(country) and str(country).strip():
             info += f"{country_emoji} Страна: {str(country).strip()}\n"
         else:
@@ -462,7 +465,10 @@ async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_
                     
                     # Добавляем популярность
                     context += f"⚡️ TOP LAST: {popularity_last:.0f}% (№{rank_6m})\n"
-                    context += f"🚀 TOP ALL: {popularity_all:.0f}% (№{rank_all})\n\n"
+                    context += f"🚀 TOP ALL: {popularity_all:.0f}% (№{rank_all})\n"
+                    
+                    # Добавляем пустую строку после популярности
+                    context += "\n"
                     
                     # Добавляем TOP VERSION (процентное соотношение по фабрикам и качеству)
                     aroma_name = product.get('Аромат', '')
@@ -538,7 +544,9 @@ async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_
                     
                     # Отображаем бренд и страну
                     context += f"® Бренд: {brand}\n"
+                    logger.info(f"Страна для {brand} - {aroma}: '{country}'")
                     country_emoji = get_country_emoji(country)
+                    logger.info(f"Эмоджи для страны '{country}': {country_emoji}")
                     if country and not pd.isna(country) and str(country).strip():
                         context += f"{country_emoji} Страна: {str(country).strip()}\n"
                     else:
