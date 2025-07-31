@@ -185,7 +185,7 @@ def load_excel_data():
             return None
 
 def normalize_name(name):
-    return str(name).lower().replace('-', '').replace('' ', '').replace("'", '').replace(' ', '')
+    return str(name).lower().replace('-', '').replace("'", '').replace(' ', '')
 
 def search_products(query, limit=None):
     global excel_data
