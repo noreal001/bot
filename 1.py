@@ -312,11 +312,33 @@ def format_product_info(product, include_prices=True, for_chatgpt=True):
                     if version_percents:
                         info += f"   ⚔️ TOP VERSION: {' | '.join(version_percents)}\n"
         
-        # Добавляем информацию о нотах
+        # Добавляем информацию о нотах и стране
         top_notes = product.get('Верхние ноты', '')
         middle_notes = product.get('Средние ноты', '')
         base_notes = product.get('Базовые ноты', '')
+        country = product.get('Страна', '')
         
+        # Если ноты или страна не указаны в прайсе, пробуем получить через API
+        if (not top_notes or pd.isna(top_notes) or not str(top_notes).strip()) or \
+           (not country or pd.isna(country) or not str(country).strip()):
+            try:
+                api_data = await get_notes_from_api(f"{brand} {aroma}")
+                if api_data:
+                    if not top_notes or pd.isna(top_notes) or not str(top_notes).strip():
+                        top_notes = api_data.get("top_notes", "")
+                    if not middle_notes or pd.isna(middle_notes) or not str(middle_notes).strip():
+                        middle_notes = api_data.get("middle_notes", "")
+                    if not base_notes or pd.isna(base_notes) or not str(base_notes).strip():
+                        base_notes = api_data.get("base_notes", "")
+                    if not country or pd.isna(country) or not str(country).strip():
+                        country = api_data.get("country", "")
+                    # Если ссылки нет в прайсе, берем из API
+                    if not link or pd.isna(link) or not str(link).strip() or not str(link).strip().startswith('http'):
+                        link = api_data.get("link", "")
+            except Exception as e:
+                logger.error(f"Error getting API data: {e}")
+        
+        # Отображаем ноты
         if top_notes and not pd.isna(top_notes) and str(top_notes).strip():
             info += f"🌱 Верхние ноты: {str(top_notes).strip()}\n"
         else:
@@ -333,12 +355,12 @@ def format_product_info(product, include_prices=True, for_chatgpt=True):
         # Добавляем пустую строку после нот
         info += "\n"
         
-        # Добавляем информацию о бренде и стране
-        country = product.get('Страна', '')
+        # Отображаем страну с эмоджи
+        country_emoji = get_country_emoji(country)
         if country and not pd.isna(country) and str(country).strip():
-            info += f"🇳🇱 Страна: {str(country).strip()}\n"
+            info += f"{country_emoji} Страна: {str(country).strip()}\n"
         else:
-            info += f"🇳🇱 Страна: Не указана\n"
+            info += f"{country_emoji} Страна: Не указана\n"
         
         # Добавляем пустую строку после бренда/страны
         info += "\n"
@@ -1087,6 +1109,118 @@ async def search_note_api(note):
     except Exception as e:
         logger.error(f"Search API unexpected error: {e}\n{traceback.format_exc()}")
         return {"status": "error", "message": "Неожиданная ошибка"}
+
+def get_country_emoji(country_name):
+    """Возвращает эмоджи флага страны по названию"""
+    country_emojis = {
+        'италия': '🇮🇹', 'italy': '🇮🇹',
+        'франция': '🇫🇷', 'france': '🇫🇷',
+        'германия': '🇩🇪', 'germany': '🇩🇪',
+        'великобритания': '🇬🇧', 'uk': '🇬🇧', 'england': '🇬🇧',
+        'испания': '🇪🇸', 'spain': '🇪🇸',
+        'португалия': '🇵🇹', 'portugal': '🇵🇹',
+        'нидерланды': '🇳🇱', 'netherlands': '🇳🇱', 'holland': '🇳🇱',
+        'бельгия': '🇧🇪', 'belgium': '🇧🇪',
+        'швейцария': '🇨🇭', 'switzerland': '🇨🇭',
+        'австрия': '🇦🇹', 'austria': '🇦🇹',
+        'турция': '🇹🇷', 'turkey': '🇹🇷',
+        'россия': '🇷🇺', 'russia': '🇷🇺',
+        'сша': '🇺🇸', 'usa': '🇺🇸', 'america': '🇺🇸',
+        'канада': '🇨🇦', 'canada': '🇨🇦',
+        'япония': '🇯🇵', 'japan': '🇯🇵',
+        'китай': '🇨🇳', 'china': '🇨🇳',
+        'корея': '🇰🇷', 'korea': '🇰🇷',
+        'индия': '🇮🇳', 'india': '🇮🇳',
+        'бразилия': '🇧🇷', 'brazil': '🇧🇷',
+        'аргентина': '🇦🇷', 'argentina': '🇦🇷',
+        'мексика': '🇲🇽', 'mexico': '🇲🇽',
+        'австралия': '🇦🇺', 'australia': '🇦🇺',
+        'новая зеландия': '🇳🇿', 'new zealand': '🇳🇿',
+        'южная африка': '🇿🇦', 'south africa': '🇿🇦',
+        'египет': '🇪🇬', 'egypt': '🇪🇬',
+        'марокко': '🇲🇦', 'morocco': '🇲🇦',
+        'дубай': '🇦🇪', 'uae': '🇦🇪', 'эмираты': '🇦🇪',
+        'саудовская аравия': '🇸🇦', 'saudi arabia': '🇸🇦',
+        'катар': '🇶🇦', 'qatar': '🇶🇦',
+        'кувейт': '🇰🇼', 'kuwait': '🇰🇼',
+        'бахрейн': '🇧🇭', 'bahrain': '🇧🇭',
+        'оман': '🇴🇲', 'oman': '🇴🇲',
+        'иордания': '🇯🇴', 'jordan': '🇯🇴',
+        'ливан': '🇱🇧', 'lebanon': '🇱🇧',
+        'сирия': '🇸🇾', 'syria': '🇸🇾',
+        'ирак': '🇮🇶', 'iraq': '🇮🇶',
+        'иран': '🇮🇷', 'iran': '🇮🇷',
+        'пакистан': '🇵🇰', 'pakistan': '🇵🇰',
+        'афганистан': '🇦🇫', 'afghanistan': '🇦🇫',
+        'узбекистан': '🇺🇿', 'uzbekistan': '🇺🇿',
+        'казахстан': '🇰🇿', 'kazakhstan': '🇰🇿',
+        'киргизия': '🇰🇬', 'kyrgyzstan': '🇰🇬',
+        'таджикистан': '🇹🇯', 'tajikistan': '🇹🇯',
+        'туркменистан': '🇹🇲', 'turkmenistan': '🇹🇲',
+        'азербайджан': '🇦🇿', 'azerbaijan': '🇦🇿',
+        'грузия': '🇬🇪', 'georgia': '🇬🇪',
+        'армения': '🇦🇲', 'armenia': '🇦🇲',
+        'молдова': '🇲🇩', 'moldova': '🇲🇩',
+        'украина': '🇺🇦', 'ukraine': '🇺🇦',
+        'беларусь': '🇧🇾', 'belarus': '🇧🇾',
+        'латвия': '🇱🇻', 'latvia': '🇱🇻',
+        'литва': '🇱🇹', 'lithuania': '🇱🇹',
+        'эстония': '🇪🇪', 'estonia': '🇪🇪',
+        'польша': '🇵🇱', 'poland': '🇵🇱',
+        'чехия': '🇨🇿', 'czech republic': '🇨🇿',
+        'словакия': '🇸🇰', 'slovakia': '🇸🇰',
+        'венгрия': '🇭🇺', 'hungary': '🇭🇺',
+        'румыния': '🇷🇴', 'romania': '🇷🇴',
+        'болгария': '🇧🇬', 'bulgaria': '🇧🇬',
+        'греция': '🇬🇷', 'greece': '🇬🇷',
+        'хорватия': '🇭🇷', 'croatia': '🇭🇷',
+        'сербия': '🇷🇸', 'serbia': '🇷🇸',
+        'черногория': '🇲🇪', 'montenegro': '🇲🇪',
+        'албания': '🇦🇱', 'albania': '🇦🇱',
+        'македония': '🇲🇰', 'macedonia': '🇲🇰',
+        'словения': '🇸🇮', 'slovenia': '🇸🇮',
+        'босния': '🇧🇦', 'bosnia': '🇧🇦',
+        'кипр': '🇨🇾', 'cyprus': '🇨🇾',
+        'мальта': '🇲🇹', 'malta': '🇲🇹',
+        'исландия': '🇮🇸', 'iceland': '🇮🇸',
+        'норвегия': '🇳🇴', 'norway': '🇳🇴',
+        'швеция': '🇸🇪', 'sweden': '🇸🇪',
+        'финляндия': '🇫🇮', 'finland': '🇫🇮',
+        'дания': '🇩🇰', 'denmark': '🇩🇰',
+        'ирландия': '🇮🇪', 'ireland': '🇮🇪',
+        'люксембург': '🇱🇺', 'luxembourg': '🇱🇺',
+        'монaco': '🇲🇨', 'monaco': '🇲🇨',
+        'андорра': '🇦🇩', 'andorra': '🇦🇩',
+        'сан-марино': '🇸🇲', 'san marino': '🇸🇲',
+        'ватикан': '🇻🇦', 'vatican': '🇻🇦',
+        'лихтенштейн': '🇱🇮', 'liechtenstein': '🇱🇮'
+    }
+    
+    if not country_name:
+        return "🌍"
+    
+    country_lower = str(country_name).lower().strip()
+    return country_emojis.get(country_lower, "🌍")
+
+async def get_notes_from_api(aroma_name):
+    """Получает ноты аромата через API"""
+    try:
+        result = await search_note_api(aroma_name)
+        if result.get("status") == "success" and "data" in result:
+            data = result["data"]
+            if isinstance(data, list) and len(data) > 0:
+                aroma_data = data[0]  # Берем первый результат
+                return {
+                    "top_notes": aroma_data.get("top_notes", ""),
+                    "middle_notes": aroma_data.get("middle_notes", ""),
+                    "base_notes": aroma_data.get("base_notes", ""),
+                    "country": aroma_data.get("country", ""),
+                    "link": aroma_data.get("link", "")
+                }
+        return None
+    except Exception as e:
+        logger.error(f"Error getting notes from API: {e}")
+        return None
 
 # --- Telegram sendMessage ---
 async def telegram_send_message(chat_id, text, reply_markup=None, parse_mode="HTML"):
