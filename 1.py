@@ -583,7 +583,7 @@ async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_
                 else:
                     context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   �� Популярность (6 мес): {popularity_last:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all:.2f}% (№{rank_all})\n\n💰 Стоимость:\n{format_prices(product)}\n\n"
         # Информация о фабриках
-        context += "\n🏭 ДОСТУПНЫЕ ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN\n
+        context += "\n🏭 ДОСТУПНЫЕ ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN\n"
         context += "⭐ КАЧЕСТВА: TOP > Q1 > Q2\n"
         context += "\n💰 ЦЕНОВЫЕ КАТЕГОРИИ:\n"
         context += "• 30-49 мл: цена из столбца '30 GR'\n"
