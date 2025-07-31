@@ -256,18 +256,49 @@ def schedule_weekly_messages():
     logger.info("Weekly message scheduler started")
 
 def greet():
+    welcome = (
+        "<b>Здравствуйте!nn"
+        "Я — ваш ароматный помощник от BAHUR.n"
+        "🍓 Ищу ноты и 🐆 отвечаю на вопросы с любовью. ❤nn"
+        "📊 <i>Лимит: 100 запросов в сутки</i>n"
+        "💡 <i>Используйте /menu для возврата в главное меню</i></b>"
+    )
+    main_menu = {
+        "inline_keyboard": [
+            [{"text": "🐆 AI-Пантера", "callback_data": "ai"}],
+            [
+                {"text": "�� Прайс", "url": "https://drive.google.com/file/d/1J70LlZwh6g7JOryDG2br-weQrYfv6zTc/view?usp=sharing"},
+                {"text": "🍿 Магазин", "url": "https://www.bahur.store/m/"},
+                {"text": "♾️ Вопросы", "url": "https://vk.com/@bahur_store-optovye-praisy-ot-bahur"}
+            ],
+            [
+                {"text": "🎮 Чат", "url": "https://t.me/+VYDZEvbp1pce4KeT"},
+                {"text": "💎 Статьи", "url": "https://vk.com/bahur_store?w=app6326142_-133936126%2523w%253Dapp6326142_-133936126"},
+                {"text": "🏆 Отзывы", "url": "https://vk.com/@bahur_store"}
+            ],
+            [{"text": "🍓 Ноты", "callback_data": "instruction"}]
+        ]
+    }
     return {
-        "text": (
-            "<b>🌟🐆 Я AI-Пантера — ваш помощник по ароматам! 🐾\n\n"
-            "💡 <i>Используйте /menu для возврата в главное меню</i>\n\n"
-            "📊 <i>Лимит: 100 запросов в сутки</i></b>"
-        ),
-        "reply_markup": {
-            "inline_keyboard": [
-                [{"text": "🐆 AI-Пантера", "callback_data": "ai_mode"}],
-                [{"text": "🍓 Ноты", "callback_data": "note_mode"}]
-            ]
-        }
+        "text": welcome,
+        "reply_markup": main_menu
+    }
+            [
+                {"text": "🍦 Прайс", "url": "https://drive.google.com/file/d/1J70LlZwh6g7JOryDG2br-weQrYfv6zTc/view?usp=sharing"},
+                {"text": "🍿 Магазин", "url": "https://www.bahur.store/m/"},
+                {"text": "♾️ Вопросы", "url": "https://vk.com/@bahur_store-optovye-praisy-ot-bahur"}
+            ],
+            [
+                {"text": "🎮 Чат", "url": "https://t.me/+VYDZEvbp1pce4KeT"},
+                {"text": "💎 Статьи", "url": "https://vk.com/bahur_store?w=app6326142_-133936126%2523w%253Dapp6326142_-133936126"},
+                {"text": "🏆 Отзывы", "url": "https://vk.com/@bahur_store"}
+            ],
+            [{"text": "🍓 Ноты", "callback_data": "instruction"}]
+        ]
+    }
+    return {
+        "text": welcome,
+        "reply_markup": main_menu
     }
 
 # --- ChatGPT API ---
@@ -369,6 +400,32 @@ async def search_note_api(note):
 
 # --- Telegram sendMessage ---
 async def telegram_send_message(chat_id, text, reply_markup=None, parse_mode="HTML"):
+async def telegram_send_chat_action(chat_id, action):
+    """Отправляет действие чата (typing, upload_photo, etc.)"""
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/sendChatAction"
+        payload = {
+            "chat_id": chat_id,
+            "action": action
+        }
+        
+        timeout = httpx.Timeout(10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code != 200:
+                logger.error(f"Telegram ChatAction API error: {resp.status_code} - {resp.text}")
+                return False
+            return True
+            
+    except httpx.TimeoutException:
+        logger.error("Telegram ChatAction API timeout")
+        return False
+    except httpx.RequestError as e:
+        logger.error(f"Telegram ChatAction API request error: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Telegram ChatAction API unexpected error: {e}")
+        return False
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         payload = {
@@ -559,6 +616,7 @@ async def telegram_webhook_impl(request: Request):
                     logger.info(f"[AI] Processing question from {user_id}: {text}")
                     
                     # Отправляем сообщение о начале обработки
+                    await telegram_send_chat_action(chat_id, "typing")
                     await telegram_send_message(chat_id, "🐾 Обрабатываю ваш запрос...")
                     
                     # Получаем ответ от ChatGPT
@@ -716,6 +774,32 @@ async def telegram_webhook_impl(request: Request):
                 set_user_state(user_id, None)
                 
             elif callback_data == "ai_mode":
+            elif callback_data == "ai":
+                ai_text = (
+                    "🐾✨ Я AI-Пантера — ваш умный помощник по ароматам! 🌟nn"
+                    "Спрашивай про любые духи, масла, доставку или цены — я найду всё в нашем каталоге! 🌟nn"
+                    "📊 Лимит: 100 запросов в сутки"
+                )
+                buttons = {
+                    "inline_keyboard": [
+                        [{"text": "🏠 Главное меню", "callback_data": "main_menu"}]
+                    ]
+                }
+                await telegram_edit_message(chat_id, message_id, ai_text, buttons)
+                set_user_state(user_id, "awaiting_ai_question")
+            elif callback_data == "instruction":
+                note_text = (
+                    "🐾✨ Я знаю все ароматы по нотам! 🍓nn"
+                    "🍉 Напиши любую ноту (например, апельсин, клубника) — я найду ароматы с этой нотой!nn"
+                    "📊 Лимит: 100 запросов в сутки"
+                )
+                buttons = {
+                    "inline_keyboard": [
+                        [{"text": "🏠 Главное меню", "callback_data": "main_menu"}]
+                    ]
+                }
+                await telegram_edit_message(chat_id, message_id, note_text, buttons)
+                set_user_state(user_id, "awaiting_note_search")
                 ai_text = (
                     "🐾✨ Я AI-Пантера — ваш умный помощник по ароматам! 🌟\n\n"
                     "Спрашивай про любые духи, масла, доставку или цены — я найду всё в нашем каталоге! 🌟\n\n"
