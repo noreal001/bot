@@ -222,7 +222,7 @@ def get_top_products(factory=None, quality=None, sort_by='TOP LAST', limit=None)
         df = df.head(limit)
     return df.to_dict('records')
 
-def format_product_info(product, include_prices=True, for_deepseek=True):
+def format_product_info(product, include_prices=True, for_chatgpt=True):
     """Форматирует информацию о продукте"""
     try:
         brand = product.get('Бренд', 'N/A')
@@ -232,8 +232,8 @@ def format_product_info(product, include_prices=True, for_deepseek=True):
         # Качество уже в правильном формате (TOP/Q1/Q2)
         quality_raw = product.get('Качество', 'N/A')
         
-        if for_deepseek:
-            # Для DeepSeek используем качество как есть
+            if for_chatgpt:
+        # Для ChatGPT используем качество как есть
             quality = quality_raw
         else:
             # Для пользователей добавляем описания
@@ -304,8 +304,8 @@ def get_aroma_variants_stats(aroma_name):
         })
     return result
 
-def get_excel_context_for_deepseek(query="", volume_ml=None, show_variants_stats=False):
-    """Создает СТРОГО СТРУКТУРИРОВАННЫЙ контекст из Excel данных для DeepSeek, с расчетом цен и статистикой вариантов"""
+def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_stats=False):
+    """Создает СТРОГО СТРУКТУРИРОВАННЫЙ контекст из Excel данных для ChatGPT, с расчетом цен и статистикой вариантов"""
     try:
         MAX_PRODUCTS_FOR_LLM = 20
         context = "\n=== АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ПРАЙС-ЛИСТА ===\n"
@@ -622,7 +622,7 @@ def start_weekly_scheduler():
 TOKEN = os.getenv('TOKEN')
 BASE_WEBHOOK_URL = os.getenv('WEBHOOK_BASE_URL')
 WEBHOOK_PATH = "/webhook/ai-bear-123456"
-DEEPSEEK_API = os.getenv('DEEPSEEK')
+OPENAI_API = "REMOVED"
 
 # --- FastAPI app ---
 print('=== [LOG] FastAPI app создаётся ===')
@@ -648,7 +648,7 @@ async def log_routes():
     logger.info(f"WEBHOOK_PATH: {WEBHOOK_PATH}")
     logger.info("=========================")
 
-# --- DeepSeek и данные Bahur ---
+# --- ChatGPT и данные Bahur ---
 def load_bahur_data():
     with open("bahur_data.txt", "r", encoding="utf-8") as f:
         return f.read()
@@ -771,9 +771,9 @@ def analyze_query_for_excel_data(question):
     
     return needs_excel, search_query
 
-async def ask_deepseek(question):
+async def ask_chatgpt(question):
     try:
-        logger.info(f"🧠 ЗАПРОС К DEEPSEEK")
+        logger.info(f"🧠 ЗАПРОС К CHATGPT")
         logger.info(f"  ❓ Вопрос пользователя: '{question}'")
         # Анализируем запрос для определения необходимости Excel данных
         needs_excel, search_query = analyze_query_for_excel_data(question)
@@ -813,7 +813,7 @@ async def ask_deepseek(question):
         # Добавляем Excel данные если нужно
         if needs_excel:
             logger.info(f"  📊 Загружаем данные из Excel таблицы...")
-            excel_context = get_excel_context_for_deepseek(search_query, volume_ml=volume_ml, show_variants_stats=show_variants_stats)
+            excel_context = get_excel_context_for_chatgpt(search_query, volume_ml=volume_ml, show_variants_stats=show_variants_stats)
             system_content += excel_context
             excel_context_length = len(excel_context)
             logger.info(f"  📈 КОНТЕКСТ ИЗ EXCEL: {excel_context_length} символов")
@@ -847,13 +847,13 @@ async def ask_deepseek(question):
             "23. Используй только эти эмодзи для нот: 🌱 (верхние), 🌿 (средние), 🍃 (базовые), ® (бренд), 🇳🇱 (страна), 🥀 (пол). Описывай ноты строго по шаблону выше.\n"
         )
         
-        url = "https://api.deepseek.com/v1/chat/completions"
+        url = "https://api.openai.com/v1/chat/completions"
         headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API}",
+            "Authorization": f"Bearer {OPENAI_API}",
             "Content-Type": "application/json"
         }
         data = {
-            "model": "deepseek-chat",
+            "model": "gpt-4",
             "messages": [
                 {
                     "role": "system",
@@ -872,36 +872,36 @@ async def ask_deepseek(question):
         logger.info(f"  📊 ФИНАЛЬНАЯ СТАТИСТИКА:")
         logger.info(f"    - Общий размер контекста: {total_context_length} символов")
         logger.info(f"    - Использованы Excel данные: {needs_excel}")
-        logger.info(f"  🚀 Отправляем запрос в DeepSeek...")
+        logger.info(f"  🚀 Отправляем запрос в ChatGPT...")
         
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, headers=headers, json=data) as resp:
                 if resp.status != 200:
-                    logger.error(f"❌ DeepSeek API error: {resp.status} - {await resp.text()}")
+                    logger.error(f"❌ ChatGPT API error: {resp.status} - {await resp.text()}")
                     return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
                 
                 result = await resp.json()
                 if "choices" not in result or not result["choices"]:
-                    logger.error(f"❌ DeepSeek API unexpected response: {result}")
+                    logger.error(f"❌ ChatGPT API unexpected response: {result}")
                     return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
                 
                 response_content = result["choices"][0]["message"]["content"].strip()
                 
-                logger.info(f"  ✅ ОТВЕТ ОТ DEEPSEEK ПОЛУЧЕН:")
+                logger.info(f"  ✅ ОТВЕТ ОТ CHATGPT ПОЛУЧЕН:")
                 logger.info(f"    - Длина ответа: {len(response_content)} символов")
                 logger.info(f"    - Первые 200 символов: '{response_content[:200]}{'...' if len(response_content) > 200 else ''}'")
                 
                 return response_content
                 
     except asyncio.TimeoutError:
-        logger.error(f"⏰ DeepSeek API timeout для вопроса: '{question}'")
+        logger.error(f"⏰ ChatGPT API timeout для вопроса: '{question}'")
         return "Извините, запрос занял слишком много времени. Попробуйте еще раз."
     except aiohttp.ClientError as e:
-        logger.error(f"🌐 DeepSeek API client error для вопроса '{question}': {e}")
+        logger.error(f"🌐 ChatGPT API client error для вопроса '{question}': {e}")
         return "Извините, произошла ошибка сети. Попробуйте еще раз."
     except Exception as e:
-        logger.error(f"💥 DeepSeek API unexpected error для вопроса '{question}': {e}\n{traceback.format_exc()}")
+        logger.error(f"💥 ChatGPT API unexpected error для вопроса '{question}': {e}\n{traceback.format_exc()}")
         return "Извините, произошла неожиданная ошибка. Попробуйте еще раз."
 
 async def search_note_api(note):
@@ -1208,9 +1208,9 @@ async def process_voice_message(voice, chat_id):
                 
                 # Распознаем речь с использованием tempfile
                 text_content = await recognize_voice_content(file_content, chat_id)
-                # Если результат не ошибка, отправляем в дипсик
+                # Если результат не ошибка, отправляем в ChatGPT
                 if text_content and not any(err in text_content for err in ["Ошибка", "Не удалось", "недоступно"]):
-                    ai_answer = await ask_deepseek(text_content)
+                    ai_answer = await ask_chatgpt(text_content)
                     return ai_answer
                 else:
                     return text_content
@@ -1260,7 +1260,7 @@ async def process_voice_message_alternative(voice, chat_id):
                 # Пытаемся распознать речь без aifc
                 text_content = await recognize_voice_content(file_content, chat_id)
                 if text_content and not any(err in text_content for err in ["Ошибка", "Не удалось", "недоступно"]):
-                    ai_answer = await ask_deepseek(text_content)
+                    ai_answer = await ask_chatgpt(text_content)
                     return ai_answer
                 else:
                     return text_content
@@ -1640,7 +1640,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                                 logger.info(f"[TG] Voice recognized text: {text_content[:100]}...")
                                 
                                 if text_content and not any(err in text_content for err in ["Ошибка", "Не удалось", "недоступно"]):
-                                    ai_answer = await ask_deepseek(text_content)
+                                    ai_answer = await ask_chatgpt(text_content)
                                     ai_answer = ai_answer.replace('*', '')
                                     buttons = extract_links_from_text(ai_answer)
                                     ai_answer_clean = remove_html_links(ai_answer)
@@ -1735,7 +1735,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     logger.info(f"[TG] Processing AI question for user {user_id}")
                     # Отправляем индикатор "печатает"
                     await send_typing_action(chat_id)
-                    ai_answer = await ask_deepseek(text)
+                    ai_answer = await ask_chatgpt(text)
                     ai_answer = ai_answer.replace('*', '')
                     
                     # Извлекаем ссылки из ответа и создаем кнопки
@@ -1964,7 +1964,7 @@ async def healthcheck():
 async def handle_message(msg: MessageModel):
     user_id = msg.user_id
     text = msg.text.strip()
-    ai_answer = await ask_deepseek(text)
+    ai_answer = await ask_chatgpt(text)
     ai_answer = ai_answer.replace('*', '')
     return JSONResponse({"answer": ai_answer, "parse_mode": "HTML"})
 
