@@ -913,9 +913,17 @@ async def ask_chatgpt(question):
         logger.info(f"  📊 ФИНАЛЬНАЯ СТАТИСТИКА:")
         logger.info(f"    - Общий размер контекста: {total_context_length} символов")
         logger.info(f"    - Использованы Excel данные: {needs_excel}")
+        
+        # Проверяем размер контекста
+        if total_context_length > 8000:
+            logger.warning(f"⚠️ Контекст слишком большой ({total_context_length} символов), обрезаем...")
+            # Оставляем только базовый контекст и первые 4000 символов Excel данных
+            system_content = system_content[:4000] + "\n\n[Данные обрезаны для ускорения ответа]"
+            logger.info(f"  ✂️ Контекст обрезан до {len(system_content)} символов")
+        
         logger.info(f"  🚀 Отправляем запрос в ChatGPT...")
         
-        timeout = aiohttp.ClientTimeout(total=30)
+        timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, headers=headers, json=data) as resp:
                 if resp.status != 200:
