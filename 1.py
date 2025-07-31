@@ -1,8 +1,6 @@
 import logging
 import sqlite3
 import re
-import requests
-import nest_asyncio
 import random
 import os
 import traceback
@@ -17,428 +15,9 @@ import uvicorn
 from datetime import datetime, timedelta
 import threading
 import time
-import pandas as pd
-from openpyxl import load_workbook
 
 print('=== [LOG] 1.py импортирован ===')
-nest_asyncio.apply()
 
-# --- Работа с Excel данными ---
-GOOGLE_SHEETS_URL = "https://docs.google.com/spreadsheets/d/1rvb3QdanuukCyXnoQZZxz7HF6aJXm2de/export?format=xlsx&gid=1870986273"
-excel_data = None
-
-def load_excel_data():
-    """Загружает данные из Google Sheets"""
-    global excel_data
-    try:
-        logger.info("Loading data from Google Sheets...")
-        
-        import requests
-        import io
-        import ssl
-        from openpyxl import load_workbook
-        
-        # Отключаем проверку SSL для Google Sheets
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
-        # Загружаем данные через requests
-        session = requests.Session()
-        session.verify = False  # Отключаем SSL проверку
-        
-        response = session.get(GOOGLE_SHEETS_URL, timeout=30)
-        response.raise_for_status()
-        
-        # Сохраняем во временный файл для извлечения гиперссылок
-        import tempfile
-        import os
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-            tmp_file.write(response.content)
-            tmp_file_path = tmp_file.name
-        
-        try:
-            # Загружаем с помощью openpyxl для извлечения гиперссылок
-            wb = load_workbook(tmp_file_path)
-            ws = wb.active
-            
-            # Извлекаем гиперссылки из столбца B
-            hyperlinks = {}
-            for row in range(4, ws.max_row + 1):  # Начинаем с 4-й строки
-                cell = ws.cell(row=row, column=2)  # Столбец B
-                if cell.hyperlink:
-                    hyperlinks[row] = cell.hyperlink.target
-                    logger.info(f"Найдена гиперссылка в строке {row}: {cell.hyperlink.target}")
-            
-            wb.close()
-            
-        finally:
-            # Удаляем временный файл
-            os.unlink(tmp_file_path)
-        
-        # Читаем Excel из памяти через pandas
-        df = pd.read_excel(io.BytesIO(response.content), header=2, skiprows=[3])
-        
-        # Очищаем данные
-        df = df.dropna(how='all')
-        
-        # Фильтруем по наличию бренда и аромата (столбцы 5 и 6)
-        if len(df.columns) > 6:
-            df = df[df.iloc[:, 5].notna() & df.iloc[:, 6].notna()]
-        else:
-            logger.warning("Not enough columns in Google Sheets data")
-            raise Exception("Invalid data structure")
-        
-        # Переименовываем столбцы для удобства (новая структура таблицы)
-        if len(df.columns) >= 13:
-            column_mapping = {
-                df.columns[1]: 'Ссылка',     # Столбец B (ссылка на аромат)
-                df.columns[5]: 'Бренд',      # Столбец 5
-                df.columns[6]: 'Аромат',     # Столбец 6
-                df.columns[7]: 'Пол',        # Столбец 7
-                df.columns[8]: 'Фабрика',    # Столбец 8
-                df.columns[9]: 'Качество',   # Столбец 9 (уже в формате TOP/Q1/Q2)
-                df.columns[10]: '30 GR',     # Столбец 10
-                df.columns[11]: '50 GR',     # Столбец 11
-                df.columns[12]: '500 GR',    # Столбец 12
-                df.columns[13]: '1 KG',      # Столбец 13
-            }
-            
-            # Добавляем столбцы для нот и страны (если они есть)
-            if len(df.columns) > 14:
-                column_mapping[df.columns[14]] = 'Страна'
-            if len(df.columns) > 15:
-                column_mapping[df.columns[15]] = 'Верхние ноты'
-            if len(df.columns) > 16:
-                column_mapping[df.columns[16]] = 'Средние ноты'
-            if len(df.columns) > 17:
-                column_mapping[df.columns[17]] = 'Базовые ноты'
-            
-            # Добавляем столбцы TOP LAST и TOP ALL (сдвигаем индексы из-за добавленных столбцов)
-            if len(df.columns) > 18:
-                column_mapping[df.columns[18]] = 'TOP LAST'
-            if len(df.columns) > 19:
-                column_mapping[df.columns[19]] = 'TOP ALL'
-            
-            df = df.rename(columns=column_mapping)
-        else:
-            logger.warning(f"Not enough columns: {len(df.columns)}")
-            raise Exception("Invalid column structure")
-        
-        # Добавляем гиперссылки к данным
-        if hyperlinks:
-            # Создаем столбец с гиперссылками
-            df['Гиперссылка'] = ''
-            for idx, row in df.iterrows():
-                # Индекс строки в Excel (начиная с 4-й строки)
-                excel_row = idx + 4
-                if excel_row in hyperlinks:
-                    df.at[idx, 'Гиперссылка'] = hyperlinks[excel_row]
-                    logger.info(f"Добавлена гиперссылка для строки {idx}: {hyperlinks[excel_row]}")
-        
-        # Конвертируем типы данных
-        price_columns = ['30 GR', '50 GR', '500 GR', '1 KG']
-        for col in price_columns:
-            if col in df.columns:
-                # Убираем символы валюты и конвертируем в числа
-                df[col] = df[col].astype(str).str.replace('₽', '').str.replace(' ', '').str.replace('nan', '')
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # Конвертируем столбцы популярности (данные уже в процентах)
-        if 'TOP LAST' in df.columns:
-            df['TOP LAST'] = pd.to_numeric(df['TOP LAST'], errors='coerce')
-        
-        if 'TOP ALL' in df.columns:
-            df['TOP ALL'] = pd.to_numeric(df['TOP ALL'], errors='coerce')
-        
-        # Очищаем пробелы в качестве
-        if 'Качество' in df.columns:
-            df['Качество'] = df['Качество'].astype(str).str.strip()
-        
-        # Очищаем от строк без данных
-        df = df[df['Бренд'].notna() & df['Аромат'].notna()]
-        
-        excel_data = df
-        logger.info(f"Google Sheets data loaded: {len(df)} products")
-        return df
-        
-    except Exception as e:
-        logger.error(f"Failed to load Google Sheets data: {e}")
-        # Fallback к локальному файлу
-        try:
-            logger.info("Falling back to local Excel file...")
-            df = pd.read_excel("1.xlsx", header=2, skiprows=[3])
-            df = df.dropna(how='all')
-            df = df[~df['Бренд'].astype(str).str.contains('Column', na=False)]
-            df = df[df['Бренд'].notna()]
-            
-            price_columns = ['30 GR', '50 GR', '500 GR', '1 KG', '5 KG', '10 KG']
-            for col in price_columns:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            excel_data = df
-            logger.info(f"Local Excel data loaded: {len(df)} products")
-            return df
-        except Exception as e2:
-            logger.error(f"Failed to load local Excel data: {e2}")
-            return None
-
-def normalize_name(name):
-    return str(name).lower().replace('-', '').replace("'", '').replace(' ', '')
-
-def search_products(query, limit=None):
-    global excel_data
-    if excel_data is None:
-        return []
-    query_norm = normalize_name(query)
-    # Точное совпадение по нормализованному названию
-    exact_mask = excel_data['Аромат'].astype(str).apply(normalize_name) == query_norm
-    if exact_mask.any():
-        results = excel_data[exact_mask]
-    else:
-        # Частичное совпадение по нормализованному названию
-        mask = excel_data['Аромат'].astype(str).apply(normalize_name).str.contains(query_norm, na=False)
-        results = excel_data[mask]
-    if limit:
-        results = results.head(limit)
-    return results.to_dict('records')
-
-
-
-
-
-
-
-
-
-
-
-async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_stats=False):
-    """Создает СТРОГО СТРУКТУРИРОВАННЫЙ контекст из Excel данных для ChatGPT, с расчетом цен и статистикой вариантов"""
-    try:
-        MAX_PRODUCTS_FOR_LLM = 20
-        context = "\n=== АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ПРАЙС-ЛИСТА ===\n"
-        context += "ВНИМАНИЕ: Используй ТОЛЬКО эти цены и проценты, не придумывай свои значения!\n"
-        PRAIS_URL = "http://clck.ru/jrimp"
-        def format_prices(product):
-            prices = []
-            price_map = [
-                ("30 GR", 30),
-                ("50 GR", 50),
-                ("500 GR", 500),
-                ("1 KG", 1000)
-            ]
-            for col, vol in price_map:
-                price_per_g = product.get(col)
-                if price_per_g and not pd.isna(price_per_g):
-                    total = int(price_per_g * vol)
-                    prices.append(f"💧{vol} грамм = {total}₽ ({price_per_g}₽ - за 1 грамм)")
-                else:
-                    prices.append(f"• {vol} мл — Стоимость недоступна")
-            return "\n".join(prices)
-        def get_top_variant(variants, key):
-            if not variants:
-                return None
-            top = max(variants, key=key)
-            return top
-        def get_rank(product, all_products, key):
-            sorted_products = sorted(all_products, key=key, reverse=True)
-            for idx, p in enumerate(sorted_products, 1):
-                if p['Бренд'] == product['Бренд'] and p['Аромат'] == product['Аромат'] and p['Фабрика'] == product['Фабрика'] and p['Качество'] == product['Качество']:
-                    return idx
-            return None
-        # Поиск по запросу
-        if query:
-            products = search_products(query, limit=None)
-            total_found = len(products)
-            if total_found > MAX_PRODUCTS_FOR_LLM:
-                context += f"\n⚠️ Найдено {total_found} ароматов, показываю только первые {MAX_PRODUCTS_FOR_LLM}. Уточните запрос для более точного результата.\n"
-                products = products[:MAX_PRODUCTS_FOR_LLM]
-            if products:
-                all_products_6m = get_top_products(sort_by='TOP LAST', limit=None)
-                all_products_all = get_top_products(sort_by='TOP ALL', limit=None)
-                # Группируем варианты по названию аромата
-                aroma_name = products[0].get('Аромат', '')
-                variants = [p for p in products if p.get('Аромат', '').strip().lower() == aroma_name.strip().lower()]
-                show_variants_block = len(variants) > 1
-                sum_last = sum(p.get('TOP LAST', 0) for p in variants)
-                sum_all = sum(p.get('TOP ALL', 0) for p in variants)
-                top_variant = get_top_variant(variants, lambda p: p.get('TOP LAST', 0))
-                for i, product in enumerate(products, 1):
-                    brand = product.get('Бренд', 'N/A')
-                    aroma_raw = product.get('Аромат', 'N/A')
-                    aroma = format_aroma_name(aroma_raw)
-                    factory = product.get('Фабрика', 'N/A')
-                    quality = product.get('Качество', 'N/A')
-                    popularity_last = product.get('TOP LAST', 0)
-                    popularity_all = product.get('TOP ALL', 0)
-                    rank_6m = get_rank(product, all_products_6m, lambda p: p.get('TOP LAST', 0))
-                    rank_all = get_rank(product, all_products_all, lambda p: p.get('TOP ALL', 0))
-                                    # Используем гиперссылку из прайса, если она есть
-                    hyperlink = product.get('Гиперссылка', '')
-                    if hyperlink and not pd.isna(hyperlink) and str(hyperlink).strip() and str(hyperlink).strip().startswith('http'):
-                        aroma_url = str(hyperlink).strip()
-                        logger.info(f"Используем гиперссылку из прайса: {aroma_url}")
-                    else:
-                        # Проверяем обычную ссылку из прайса
-                        link = product.get('Ссылка', '')
-                        logger.info(f"Ссылка для {brand} - {aroma}: {link}")
-                        if link and not pd.isna(link) and str(link).strip() and str(link).strip().startswith('http'):
-                            aroma_url = str(link).strip()
-                            logger.info(f"Используем ссылку из прайса: {aroma_url}")
-                        else:
-                            # Не генерируем ссылку, если её нет в прайсе
-                            aroma_url = ""
-                            logger.info(f"Ссылка из прайса не найдена для {brand} - {aroma}")
-                    
-                    if brand != 'N/A' and aroma != 'N/A':
-                        if aroma_url and aroma_url.startswith('http'):
-                            context += f"✨ <a href='{aroma_url}'>{brand} - {aroma}</a>\n\n"
-                        else:
-                            context += f"✨{brand} - {aroma}\n\n"
-                    else:
-                        context += f"✨{brand} - {aroma}\n\n"
-                    
-                    # Добавляем популярность
-                    context += f"⚡️ TOP LAST: {popularity_last:.0f}% (№{rank_6m})\n"
-                    context += f"🚀 TOP ALL: {popularity_all:.0f}% (№{rank_all})\n"
-                    
-                    # Добавляем пустую строку после популярности
-                    context += "\n"
-                    
-                    # Добавляем TOP VERSION (процентное соотношение по фабрикам и качеству)
-                    aroma_name = product.get('Аромат', '')
-                    if aroma_name and not pd.isna(aroma_name):
-                        all_versions = [p for p in excel_data if p.get('Аромат', '').strip().lower() == aroma_name.strip().lower()]
-                        if len(all_versions) > 1:
-                            total_popularity = sum(p.get('TOP LAST', 0) for p in all_versions)
-                            if total_popularity > 0:
-                                # Группируем по фабрикам и качеству
-                                factory_stats = {}
-                                for version in all_versions:
-                                    factory = version.get('Фабрика', '')
-                                    quality = version.get('Качество', '')
-                                    popularity = version.get('TOP LAST', 0)
-                                    key = f"{factory} {quality}"
-                                    if key not in factory_stats:
-                                        factory_stats[key] = 0
-                                    factory_stats[key] += popularity
-                                
-                                # Формируем строку с процентами
-                                version_percents = []
-                                for factory_key, popularity in factory_stats.items():
-                                    percent = (popularity / total_popularity) * 100
-                                    version_percents.append(f"{factory_key}: {percent:.1f}%")
-                    
-                    if version_percents:
-                        context += f"   ♾️ VERSION: {' | '.join(version_percents)}\n"
-                    
-                    # Добавляем информацию о нотах и стране
-                    top_notes = product.get('Верхние ноты', '')
-                    middle_notes = product.get('Средние ноты', '')
-                    base_notes = product.get('Базовые ноты', '')
-                    country = product.get('Страна', '')
-                    
-                    # Если ноты или страна не указаны в прайсе, пробуем получить через API
-                    if (not top_notes or pd.isna(top_notes) or not str(top_notes).strip()) or \
-                       (not country or pd.isna(country) or not str(country).strip()):
-                        try:
-                            api_data = await get_notes_from_api(f"{brand} {aroma}")
-                            if api_data:
-                                if not top_notes or pd.isna(top_notes) or not str(top_notes).strip():
-                                    top_notes = api_data.get("top_notes", "")
-                                if not middle_notes or pd.isna(middle_notes) or not str(middle_notes).strip():
-                                    middle_notes = api_data.get("middle_notes", "")
-                                if not base_notes or pd.isna(base_notes) or not str(base_notes).strip():
-                                    base_notes = api_data.get("base_notes", "")
-                                if not country or pd.isna(country) or not str(country).strip():
-                                    country = api_data.get("country", "")
-                                # Если ссылки нет в прайсе, берем из API
-                                if not aroma_url or aroma_url == "":
-                                    api_link = api_data.get("link", "")
-                                    if api_link and api_link.startswith('http'):
-                                        aroma_url = api_link
-                        except Exception as e:
-                            logger.error(f"Error getting API data: {e}")
-                    
-                    # Отображаем ноты
-                    if top_notes and not pd.isna(top_notes) and str(top_notes).strip():
-                        context += f"🌱 Верхние ноты: {str(top_notes).strip()}\n"
-                    else:
-                        context += f"🌱 Верхние ноты: Не указаны\n"
-                    if middle_notes and not pd.isna(middle_notes) and str(middle_notes).strip():
-                        context += f"🌿 Средние ноты: {str(middle_notes).strip()}\n"
-                    else:
-                        context += f"🌿 Средние ноты: Не указаны\n"
-                    if base_notes and not pd.isna(base_notes) and str(base_notes).strip():
-                        context += f"🍃 Базовые ноты: {str(base_notes).strip()}\n"
-                    else:
-                        context += f"🍃 Базовые ноты: Не указаны\n"
-                    
-                    # Добавляем пустую строку после нот
-                    context += "\n"
-                    
-                    # Отображаем бренд и страну
-                    context += f"® Бренд: {brand}\n"
-                    logger.info(f"Страна для {brand} - {aroma}: '{country}'")
-                    country_emoji = get_country_emoji(country)
-                    logger.info(f"Эмоджи для страны '{country}': {country_emoji}")
-                    if country and not pd.isna(country) and str(country).strip():
-                        context += f"{country_emoji} Страна: {str(country).strip()}\n"
-                    else:
-                        context += f"{country_emoji} Страна: Не указана\n"
-                    
-                    # Добавляем пустую строку после страны
-                    context += "\n"
-                    # Статистика по вариантам (если есть варианты)
-                    if show_variants_block and i == 1:
-                        context += f"📊 Статистика по вариантам аромата '{aroma_name}':\n"
-                        for v in variants:
-                            percent_last = (v.get('TOP LAST', 0) / sum_last * 100) if sum_last else 0
-                            percent_all = (v.get('TOP ALL', 0) / sum_all * 100) if sum_all else 0
-                            mark = " (самый популярный)" if top_variant and v['Фабрика'] == top_variant['Фабрика'] and v['Качество'] == top_variant['Качество'] else ""
-                            context += f"- {v['Фабрика']} ({v['Качество']}): {percent_last:.1f}% за 6 мес, {percent_all:.1f}% за всё время{mark}\n"
-                    # Отступ перед стоимостью
-                    context += "\n"
-                    context += f"💵 Стоимость:\n{format_prices(product)}\n\n"
-        # ТОП-ароматы (весь прайс, но с лимитом)
-        all_products_6m = get_top_products(sort_by='TOP LAST', limit=MAX_PRODUCTS_FOR_LLM)
-        all_products_all = get_top_products(sort_by='TOP ALL', limit=MAX_PRODUCTS_FOR_LLM)
-        if all_products_6m:
-            context += f"\n🔥 ТОП-{MAX_PRODUCTS_FOR_LLM} ПОПУЛЯРНЫХ АРОМАТОВ (последние 6 месяцев):\n"
-            for i, product in enumerate(all_products_6m, 1):
-                brand = product.get('Бренд', 'N/A')
-                aroma = product.get('Аромат', 'N/A')
-                factory = product.get('Фабрика', 'N/A')
-                quality = product.get('Качество', 'N/A')
-                popularity_last = product.get('TOP LAST', 0)
-                popularity_all = product.get('TOP ALL', 0)
-                rank_6m = i
-                rank_all = get_rank(product, all_products_all, lambda p: p.get('TOP ALL', 0))
-                # Используем ссылку из прайса, если она есть и валидна
-                link = product.get('Ссылка', '')
-                if link and not pd.isna(link) and str(link).strip() and str(link).strip().startswith('http'):
-                    aroma_url = str(link).strip()
-                else:
-                    # Не генерируем ссылку, если её нет в прайсе
-                    aroma_url = ""
-                if brand != 'N/A' and aroma != 'N/A':
-                    context += f"{i}. <a href='{aroma_url}'>{brand} - {aroma}</a>\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all:.2f}% (№{rank_all})\n\n💰 Стоимость:\n{format_prices(product)}\n\n"
-                else:
-                    context += f"{i}. {brand} - {aroma}\n   🏭 {factory} ({quality})\n   �� Популярность (6 мес): {popularity_last:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all:.2f}% (№{rank_all})\n\n💰 Стоимость:\n{format_prices(product)}\n\n"
-        # Информация о фабриках
-        context += "\n🏭 ДОСТУПНЫЕ ФАБРИКИ: EPS, LUZI, SELUZ, UNKNOWN\n"
-        context += "⭐ КАЧЕСТВА: TOP > Q1 > Q2\n"
-        context += "\n💰 ЦЕНОВЫЕ КАТЕГОРИИ:\n"
-        context += "• 30-49 мл: цена из столбца '30 GR'\n"
-        context += "• 50-499 мл: цена из столбца '50 GR'\n"
-        context += "• 500-999 мл: цена из столбца '500 GR'\n"
-        context += "• 1000+ мл: цена из столбца '1 KG'\n"
-        return context
-    except Exception as e:
-        logger.error(f"Error creating Excel context: {e}")
-        return "\n❌ Ошибка загрузки актуальных данных из прайс-листа\n"
 
 # --- База данных SQLite ---
 DB_NAME = "bot_users.db"
@@ -460,6 +39,16 @@ def init_database():
                 last_activity DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_weekly_message DATETIME,
                 is_active BOOLEAN DEFAULT 1
+            )
+        ''')
+        
+        # Создаем таблицу для отслеживания лимитов запросов
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS request_limits (
+                user_id INTEGER PRIMARY KEY,
+                daily_requests INTEGER DEFAULT 0,
+                last_request_date DATE DEFAULT CURRENT_DATE,
+                FOREIGN KEY (user_id) REFERENCES users (user_id)
             )
         ''')
         
@@ -539,6 +128,90 @@ def update_weekly_message_sent(user_id):
         conn.close()
     except Exception as e:
         logger.error(f"Failed to update weekly message timestamp: {e}")
+
+def check_request_limit(user_id):
+    """Проверяет лимит запросов пользователя (10 в сутки)"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        today = datetime.now().date()
+        
+        # Получаем текущие данные о запросах
+        cursor.execute('''
+            SELECT daily_requests, last_request_date 
+            FROM request_limits 
+            WHERE user_id = ?
+        ''', (user_id,))
+        
+        result = cursor.fetchone()
+        
+        if result:
+            daily_requests, last_request_date = result
+            last_request_date = datetime.strptime(last_request_date, '%Y-%m-%d').date()
+            
+            # Если новый день, сбрасываем счетчик
+            if last_request_date < today:
+                daily_requests = 0
+                last_request_date = today
+        else:
+            # Новый пользователь
+            daily_requests = 0
+            last_request_date = today
+        
+        # Проверяем лимит
+        if daily_requests >= 10:
+            conn.close()
+            return False, daily_requests, 10  # Лимит превышен
+        
+        # Увеличиваем счетчик
+        daily_requests += 1
+        
+        # Обновляем или создаем запись
+        cursor.execute('''
+            INSERT OR REPLACE INTO request_limits (user_id, daily_requests, last_request_date)
+            VALUES (?, ?, ?)
+        ''', (user_id, daily_requests, last_request_date))
+        
+        conn.commit()
+        conn.close()
+        
+        return True, daily_requests, 10  # Запрос разрешен
+        
+    except Exception as e:
+        logger.error(f"Failed to check request limit: {e}")
+        return True, 0, 10  # В случае ошибки разрешаем запрос
+
+def get_remaining_requests(user_id):
+    """Получает количество оставшихся запросов для пользователя"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        today = datetime.now().date()
+        
+        cursor.execute('''
+            SELECT daily_requests, last_request_date 
+            FROM request_limits 
+            WHERE user_id = ?
+        ''', (user_id,))
+        
+        result = cursor.fetchone()
+        
+        if result:
+            daily_requests, last_request_date = result
+            last_request_date = datetime.strptime(last_request_date, '%Y-%m-%d').date()
+            
+            # Если новый день, сбрасываем счетчик
+            if last_request_date < today:
+                daily_requests = 0
+        
+        conn.close()
+        return max(0, 10 - daily_requests)
+        
+    except Exception as e:
+        logger.error(f"Failed to get remaining requests: {e}")
+        return 10  # В случае ошибки возвращаем полный лимит
 
 def deactivate_user(user_id):
     """Деактивирует пользователя (например, если заблокировал бота)"""
@@ -701,7 +374,7 @@ logger = logging.getLogger(__name__)
 init_database()
 
 # --- Загрузка Excel данных ---
-load_excel_data()
+# load_excel_data() - удалено, используем только bahur_data.txt
 
 # --- Состояния пользователей для AI (in-memory, not persistent) ---
 user_states = {}
@@ -747,11 +420,11 @@ class CallbackModel(BaseModel):
 # --- Утилиты ---
 def greet():
     return random.choice([
-            "Привет! 🐾✨ Я AI-Пантера — эксперт по ароматам BAHUR! Спрашивай про любые духи, масла, доставку или цены — я найду всё в нашем каталоге! 🌟",
-            "Здравствуй! 🐆💫 Готова помочь с выбором ароматов! Хочешь узнать про конкретные духи, масла, доставку или цены? Спрашивай — у меня есть полный каталог! ✨",
-            "Привет, ароматный друг! 🐆✨ Я знаю всё о духах BAHUR! Спрашивай про любые ароматы, масла, доставку — найду в каталоге и расскажу подробно! 🌟",
-            "Добро пожаловать! 🎯🐆 Я эксперт по ароматам BAHUR! Хочешь узнать про конкретные духи, масла, цены или доставку? Спрашивай — у меня есть все данные! ✨",
-            "Привет! 🌟🐾 Я AI-Пантера — знаю всё о духах BAHUR! Спрашивай про любые ароматы, масла, доставку или цены — найду в каталоге и помогу с выбором! 💫"
+            "Привет! 🐾✨ Я AI-Пантера — эксперт по ароматам BAHUR! Спрашивай про любые духи, масла, доставку или цены — я найду всё в нашем каталоге! 🌟\n\n📊 <i>Лимит: 10 запросов в сутки</i>",
+            "Здравствуй! 🐆💫 Готова помочь с выбором ароматов! Хочешь узнать про конкретные духи, масла, доставку или цены? Спрашивай — у меня есть полный каталог! ✨\n\n📊 <i>Лимит: 10 запросов в сутки</i>",
+            "Привет, ароматный друг! 🐆✨ Я знаю всё о духах BAHUR! Спрашивай про любые ароматы, масла, доставку — найду в каталоге и расскажу подробно! 🌟\n\n📊 <i>Лимит: 10 запросов в сутки</i>",
+            "Добро пожаловать! 🎯🐆 Я эксперт по ароматам BAHUR! Хочешь узнать про конкретные духи, масла, цены или доставку? Спрашивай — у меня есть все данные! ✨\n\n📊 <i>Лимит: 10 запросов в сутки</i>",
+            "Привет! 🌟🐾 Я AI-Пантера — знаю всё о духах BAHUR! Спрашивай про любые ароматы, масла, доставку или цены — найду в каталоге и помогу с выбором! 💫\n\n📊 <i>Лимит: 10 запросов в сутки</i>"
     ])
 
 def analyze_query_for_excel_data(question):
@@ -1879,6 +1552,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                         '<b>Здравствуйте!\n\n'
                         'Я — ваш ароматный помощник от BAHUR.\n'
                         '🍓 Ищу ноты и 🐆 отвечаю на вопросы с любовью. ❤\n\n'
+                        '📊 <i>Лимит: 10 запросов в сутки</i>\n'
                         '💡 <i>Используйте /menu для возврата в главное меню</i></b>'
                     )
                     main_menu = {
@@ -1910,6 +1584,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                         '<b>Здравствуйте!\n\n'
                         'Я — ваш ароматный помощник от BAHUR.\n'
                         '🍓 Ищу ноты и 🐾 отвечаю на вопросы с любовью. ❤\n\n'
+                        '📊 <i>Лимит: 10 запросов в сутки</i>\n'
                         '💡 <i>Используйте /menu для возврата в главное меню</i></b>'
                     )
                     main_menu = {
@@ -1937,6 +1612,21 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     return {"ok": True}
                 if state == 'awaiting_ai_question':
                     logger.info(f"[TG] Processing AI question for user {user_id}")
+                    
+                    # Проверяем лимит запросов
+                    can_request, current_requests, max_requests = check_request_limit(user_id)
+                    
+                    if not can_request:
+                        remaining_requests = get_remaining_requests(user_id)
+                        limit_message = (
+                            f"🚫 Достигнут дневной лимит запросов!\n\n"
+                            f"📊 Вы использовали {current_requests}/{max_requests} запросов сегодня.\n"
+                            f"⏰ Лимит обновится завтра в 00:00.\n\n"
+                            f"💡 Попробуйте завтра или используйте другие функции бота!"
+                        )
+                        await telegram_send_message(chat_id, limit_message)
+                        return {"ok": True}
+                    
                     # Отправляем индикатор "печатает"
                     await send_typing_action(chat_id)
                     ai_answer = await ask_chatgpt(text)
@@ -1955,6 +1645,21 @@ async def telegram_webhook_impl(update: dict, request: Request):
                     return {"ok": True}
                 if state == 'awaiting_note_search':
                     logger.info(f"[TG] Processing note search for user {user_id}")
+                    
+                    # Проверяем лимит запросов
+                    can_request, current_requests, max_requests = check_request_limit(user_id)
+                    
+                    if not can_request:
+                        remaining_requests = get_remaining_requests(user_id)
+                        limit_message = (
+                            f"🚫 Достигнут дневной лимит запросов!\n\n"
+                            f"📊 Вы использовали {current_requests}/{max_requests} запросов сегодня.\n"
+                            f"⏰ Лимит обновится завтра в 00:00.\n\n"
+                            f"💡 Попробуйте завтра или используйте другие функции бота!"
+                        )
+                        await telegram_send_message(chat_id, limit_message)
+                        return {"ok": True}
+                    
                     # Отправляем индикатор "печатает"
                     await send_typing_action(chat_id)
                     result = await search_note_api(text)
@@ -1985,6 +1690,21 @@ async def telegram_webhook_impl(update: dict, request: Request):
                 # Если нет состояния, проверяем, похож ли текст на ноту
                 if is_likely_note(text):
                     logger.info(f"[TG] Text '{text}' looks like a note, searching...")
+                    
+                    # Проверяем лимит запросов
+                    can_request, current_requests, max_requests = check_request_limit(user_id)
+                    
+                    if not can_request:
+                        remaining_requests = get_remaining_requests(user_id)
+                        limit_message = (
+                            f"🚫 Достигнут дневной лимит запросов!\n\n"
+                            f"📊 Вы использовали {current_requests}/{max_requests} запросов сегодня.\n"
+                            f"⏰ Лимит обновится завтра в 00:00.\n\n"
+                            f"💡 Попробуйте завтра или используйте другие функции бота!"
+                        )
+                        await telegram_send_message(chat_id, limit_message)
+                        return {"ok": True}
+                    
                     # Отправляем индикатор "печатает"
                     await send_typing_action(chat_id)
                     result = await search_note_api(text)
@@ -2018,7 +1738,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                             [{"text": "🍓 Ноты", "callback_data": "instruction"}]
                         ]
                     }
-                    success = await telegram_send_message(chat_id, "Выберите режим: 🐆 AI-Пантера или 🍓 Ноты", reply_markup=menu)
+                    success = await telegram_send_message(chat_id, "Выберите режим: 🐆 AI-Пантера или 🍓 Ноты\n\n📊 <i>Лимит: 10 запросов в сутки</i>", reply_markup=menu)
                     if success:
                         logger.info(f"[TG] Sent menu to {chat_id}")
                     else:
@@ -2051,7 +1771,7 @@ async def telegram_webhook_impl(update: dict, request: Request):
                 
                 if data == "instruction":
                     set_user_state(user_id, 'awaiting_note_search')
-                    success = await telegram_edit_message(chat_id, message_id, '🍉 Напиши любую ноту (например, апельсин, клубника) — я найду ароматы с этой нотой!')
+                    success = await telegram_edit_message(chat_id, message_id, '🍉 Напиши любую ноту (например, апельсин, клубника) — я найду ароматы с этой нотой!\n\n📊 <i>Лимит: 10 запросов в сутки</i>')
                     if success:
                         logger.info(f"[TG] Set state awaiting_note_search for {user_id}")
                     else:
