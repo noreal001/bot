@@ -134,7 +134,7 @@ def load_excel_data():
             return None
 
 def normalize_name(name):
-    return str(name).lower().replace('-', '').replace('’', '').replace("'", '').replace(' ', '')
+    return str(name).lower().replace('-', '').replace('' ', '').replace("'", '').replace(' ', '')
 
 def search_products(query, limit=None):
     global excel_data
@@ -228,12 +228,10 @@ def format_product_info(product, include_prices=True, for_chatgpt=True):
         brand = product.get('Бренд', 'N/A')
         aroma = product.get('Аромат', 'N/A')
         factory = product.get('Фабрика', 'N/A')
-        
         # Качество уже в правильном формате (TOP/Q1/Q2)
         quality_raw = product.get('Качество', 'N/A')
-        
-            if for_chatgpt:
-        # Для ChatGPT используем качество как есть
+        if for_chatgpt:
+            # Для ChatGPT используем качество как есть
             quality = quality_raw
         else:
             # Для пользователей добавляем описания
@@ -243,28 +241,23 @@ def format_product_info(product, include_prices=True, for_chatgpt=True):
                 'Q2': 'Q2 (хорошее качество)'
             }
             quality = quality_descriptions.get(quality_raw, quality_raw)
-        
         info = f"🏷️ {brand} - {aroma}\n"
         info += f"🏭 Фабрика: {factory}\n"
         info += f"⭐ Качество: {quality}\n"
-        
         if include_prices:
             prices = []
             price_ranges = [
                 ('30 GR', '30-49 мл'),
-                ('50 GR', '50-499 мл'), 
+                ('50 GR', '50-499 мл'),
                 ('500 GR', '500-999 мл'),
                 ('1 KG', '1000+ мл')
             ]
-            
             for col, range_text in price_ranges:
                 price = product.get(col)
                 if price and not pd.isna(price):
                     prices.append(f"{range_text}: {price}₽/мл")
-            
             if prices:
                 info += f"💰 Цены: {', '.join(prices)}\n"
-        
         # Статистика популярности
         top_last = product.get('TOP LAST')
         top_all = product.get('TOP ALL')
@@ -272,7 +265,6 @@ def format_product_info(product, include_prices=True, for_chatgpt=True):
             info += f"📈 Популярность (6 мес): {float(top_last)*100:.2f}%\n"
         if top_all and not pd.isna(top_all):
             info += f"📊 Популярность (всё время): {float(top_all)*100:.2f}%\n"
-        
         return info.strip()
     except Exception as e:
         logger.error(f"Error formatting product info: {e}")
