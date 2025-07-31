@@ -64,4 +64,4 @@ tmp/
 
 # Excel temp files
 ~$*.xlsx
-~$*.xls 
+~$*.xls .DS_Store
