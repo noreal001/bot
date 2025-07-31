@@ -1016,7 +1016,7 @@ async def ask_chatgpt(question):
                     "content": f"{question}"
                 }
             ],
-            "temperature": 0.5
+            "temperature": 0.3
         }
         
         # Финальная статистика перед отправкой
