@@ -134,7 +134,7 @@ def load_excel_data():
             return None
 
 def normalize_name(name):
-    return str(name).lower().replace('-', '').replace('’', '').replace("'", '').replace(' ', '')
+    return str(name).lower().replace('-', '').replace(''', '').replace("'", '').replace(' ', '')
 
 def search_products(query, limit=None):
     global excel_data
@@ -615,8 +615,16 @@ TOKEN = os.getenv('TOKEN')
 BASE_WEBHOOK_URL = os.getenv('WEBHOOK_BASE_URL')
 WEBHOOK_PATH = "/webhook/ai-bear-123456"
 OPENAI_API = os.getenv('OPENAI_API_KEY')
+
+# Проверяем переменные окружения с более мягкой обработкой
+if not TOKEN:
+    print("⚠️ WARNING: TOKEN environment variable not set!")
+if not BASE_WEBHOOK_URL:
+    print("⚠️ WARNING: WEBHOOK_BASE_URL environment variable not set!")
 if not OPENAI_API:
-    raise RuntimeError("OPENAI_API_KEY environment variable not set! Please set it in your environment.")
+    print("⚠️ WARNING: OPENAI_API_KEY environment variable not set!")
+    print("⚠️ The bot will not be able to process AI requests without this key!")
+    # Не прерываем выполнение, просто предупреждаем
 
 # --- FastAPI app ---
 print('=== [LOG] FastAPI app создаётся ===')
@@ -766,6 +774,11 @@ def analyze_query_for_excel_data(question):
     return needs_excel, search_query
 
 async def ask_chatgpt(question):
+    # Проверяем наличие API ключа
+    if not OPENAI_API:
+        logger.error("❌ OPENAI_API_KEY not set! Cannot process AI requests.")
+        return "Извините, сервис AI временно недоступен. Пожалуйста, попробуйте позже или обратитесь к администратору."
+    
     try:
         logger.info(f"🧠 ЗАПРОС К CHATGPT")
         logger.info(f"  ❓ Вопрос пользователя: '{question}'")
