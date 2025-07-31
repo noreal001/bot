@@ -314,7 +314,7 @@ async def ask_chatgpt(question):
         )
         
         payload = {
-            "model": "gpt-3.5-turbo",
+            "model": "gpt-4",
             "messages": [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": question}
