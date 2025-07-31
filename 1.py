@@ -286,7 +286,7 @@ async def ask_chatgpt(question):
         }
         
         # Ограничиваем размер данных для избежания превышения лимита токенов
-        bahur_data_limited = bahur_data[:4000]  # Ограничиваем до 4000 символов
+        bahur_data_limited = bahur_data[:2000]  # Ограничиваем до 2000 символов
         
         system_content = (
             "Ты - AI-Пантера (менеджер по продажам) компании BAHUR - оптового поставщика парфюмерных масел.\n"
@@ -320,7 +320,7 @@ async def ask_chatgpt(question):
                 {"role": "user", "content": question}
             ],
             "temperature": 0.3,
-            "max_tokens": 8000
+            "max_tokens": 12000
         }
         
         timeout = httpx.Timeout(60.0)
@@ -693,43 +693,10 @@ async def telegram_webhook_impl(request: Request):
                     logger.info(f"[TG] Sent auto_note_result to {chat_id}")
                     return {"ok": True}
                 
-                # Если нет активного состояния, обрабатываем через AI
+                # Если нет активного состояния, показываем меню
                 else:
-                    # Проверяем лимит запросов
-                    if not check_request_limit(user_id):
-                        limit_message = (
-                            "🚫 Достигнут дневной лимит запросов (100 в сутки).\n\n"
-                            "Попробуйте завтра или используйте другие функции бота! 🐾"
-                        )
-                        await telegram_send_message(chat_id, limit_message)
-                        return {"ok": True}
-                    
-                    logger.info(f"[AI] Processing general message from {user_id}: {text}")
-                    
-                    # Отправляем сообщение о начале обработки
-                    await telegram_send_message(chat_id, "🐾 Обрабатываю ваш запрос...")
-                    
-                    # Получаем ответ от ChatGPT
-                    ai_answer = await ask_chatgpt(text)
-                    logger.info(f"✅ ОТВЕТ ОТ CHATGPT ПОЛУЧЕН:")
-                    logger.info(f"- Длина ответа: {len(ai_answer)} символов")
-                    logger.info(f"- Первые 200 символов: '{ai_answer[:200]}'")
-                    
-                    # Очищаем ответ от markdown
-                    ai_answer_clean = ai_answer.replace("**", "").replace("*", "").replace("__", "").replace("_", "")
-                    
-                    # Создаем кнопки возврата
-                    buttons = {
-                        "inline_keyboard": [
-                            [{"text": "🔄 Задать ещё вопрос", "callback_data": "ai_mode"}],
-                            [{"text": "🏠 Главное меню", "callback_data": "main_menu"}]
-                        ]
-                    }
-                    
-                    # Отправляем ответ
-                    await send_long_message(chat_id, ai_answer_clean, buttons if buttons else None)
-                    logger.info(f"[TG] Sent ai_answer to {chat_id}")
-                    
+                    greeting = greet()
+                    await telegram_send_message(chat_id, greeting["text"], greeting["reply_markup"])
                     return {"ok": True}
         
         # Обработка callback запросов
