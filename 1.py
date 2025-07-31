@@ -75,11 +75,21 @@ def load_excel_data():
                 df.columns[13]: '1 KG',      # Столбец 13
             }
             
-            # Добавляем столбцы TOP LAST и TOP ALL (столбцы 15 и 16)
+            # Добавляем столбцы для нот и страны (если они есть)
+            if len(df.columns) > 14:
+                column_mapping[df.columns[14]] = 'Страна'
             if len(df.columns) > 15:
-                column_mapping[df.columns[15]] = 'TOP LAST'
+                column_mapping[df.columns[15]] = 'Верхние ноты'
             if len(df.columns) > 16:
-                column_mapping[df.columns[16]] = 'TOP ALL'
+                column_mapping[df.columns[16]] = 'Средние ноты'
+            if len(df.columns) > 17:
+                column_mapping[df.columns[17]] = 'Базовые ноты'
+            
+            # Добавляем столбцы TOP LAST и TOP ALL (сдвигаем индексы из-за добавленных столбцов)
+            if len(df.columns) > 18:
+                column_mapping[df.columns[18]] = 'TOP LAST'
+            if len(df.columns) > 19:
+                column_mapping[df.columns[19]] = 'TOP ALL'
             
             df = df.rename(columns=column_mapping)
         else:
