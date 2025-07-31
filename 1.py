@@ -257,32 +257,15 @@ def schedule_weekly_messages():
 
 def greet():
     welcome = (
-        "<b>Здравствуйте!nn"
-        "Я — ваш ароматный помощник от BAHUR.n"
-        "🍓 Ищу ноты и 🐆 отвечаю на вопросы с любовью. ❤nn"
-        "📊 <i>Лимит: 100 запросов в сутки</i>n"
+        "<b>Здравствуйте!\n\n"
+        "Я — ваш ароматный помощник от BAHUR.\n"
+        "🍓 Ищу ноты и 🐆 отвечаю на вопросы с любовью. ❤\n\n"
+        "📊 <i>Лимит: 100 запросов в сутки</i>\n"
         "💡 <i>Используйте /menu для возврата в главное меню</i></b>"
     )
     main_menu = {
         "inline_keyboard": [
             [{"text": "🐆 AI-Пантера", "callback_data": "ai"}],
-            [
-                {"text": "�� Прайс", "url": "https://drive.google.com/file/d/1J70LlZwh6g7JOryDG2br-weQrYfv6zTc/view?usp=sharing"},
-                {"text": "🍿 Магазин", "url": "https://www.bahur.store/m/"},
-                {"text": "♾️ Вопросы", "url": "https://vk.com/@bahur_store-optovye-praisy-ot-bahur"}
-            ],
-            [
-                {"text": "🎮 Чат", "url": "https://t.me/+VYDZEvbp1pce4KeT"},
-                {"text": "💎 Статьи", "url": "https://vk.com/bahur_store?w=app6326142_-133936126%2523w%253Dapp6326142_-133936126"},
-                {"text": "🏆 Отзывы", "url": "https://vk.com/@bahur_store"}
-            ],
-            [{"text": "🍓 Ноты", "callback_data": "instruction"}]
-        ]
-    }
-    return {
-        "text": welcome,
-        "reply_markup": main_menu
-    }
             [
                 {"text": "🍦 Прайс", "url": "https://drive.google.com/file/d/1J70LlZwh6g7JOryDG2br-weQrYfv6zTc/view?usp=sharing"},
                 {"text": "🍿 Магазин", "url": "https://www.bahur.store/m/"},
