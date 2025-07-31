@@ -65,3 +65,4 @@ tmp/
 # Excel temp files
 ~$*.xlsx
 ~$*.xls .DS_Store
+.env

@@ -15,6 +15,10 @@ import uvicorn
 from datetime import datetime, timedelta
 import threading
 import time
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения из .env файла
+load_dotenv()
 
 print('=== [LOG] 1.py импортирован ===')
 
