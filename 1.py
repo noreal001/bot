@@ -560,7 +560,13 @@ async def get_excel_context_for_chatgpt(query="", volume_ml=None, show_variants_
                 popularity_all = product.get('TOP ALL', 0)
                 rank_6m = i
                 rank_all = get_rank(product, all_products_all, lambda p: p.get('TOP ALL', 0))
-                aroma_url = f"https://bahur.store/search?q={brand.replace(' ', '+')}+{aroma.replace(' ', '+')}"
+                # Используем ссылку из прайса, если она есть и валидна
+                link = product.get('Ссылка', '')
+                if link and not pd.isna(link) and str(link).strip() and str(link).strip().startswith('http'):
+                    aroma_url = str(link).strip()
+                else:
+                    # Не генерируем ссылку, если её нет в прайсе
+                    aroma_url = ""
                 if brand != 'N/A' and aroma != 'N/A':
                     context += f"{i}. <a href='{aroma_url}'>{brand} - {aroma}</a>\n   🏭 {factory} ({quality})\n   📈 Популярность (6 мес): {popularity_last:.2f}% (№{rank_6m})\n   📊 Популярность (всё время): {popularity_all:.2f}% (№{rank_all})\n\n💰 Стоимость:\n{format_prices(product)}\n\n"
                 else:
