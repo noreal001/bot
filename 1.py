@@ -286,7 +286,7 @@ async def ask_chatgpt(question):
         }
         
         # Ограничиваем размер данных для избежания превышения лимита токенов
-        bahur_data_limited = bahur_data[:2000]  # Ограничиваем до 2000 символов
+        bahur_data_limited = bahur_data[:4000]  # Ограничиваем до 2000 символов
         
         system_content = (
             "Ты - AI-Пантера (менеджер по продажам) компании BAHUR - оптового поставщика парфюмерных масел.\n"
@@ -314,7 +314,7 @@ async def ask_chatgpt(question):
         )
         
         payload = {
-            "model": "gpt-4",
+            "model": "gpt-3.5-turbo",
             "messages": [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": question}
