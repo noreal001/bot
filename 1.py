@@ -163,7 +163,11 @@ def greet():
 
 async def ask_chatgpt(question, user_id=None):
     try:
-        url = "https://api.openai.com/v1/chat/completions"
+        # Выбор API в зависимости от модели
+        model_lower = (OPENAI_MODEL or "").lower()
+        use_responses_api = model_lower.startswith("gpt-5") or model_lower.startswith("gpt-4.1") or model_lower.startswith("gpt-4o")
+
+        url = "https://api.openai.com/v1/responses" if use_responses_api else "https://api.openai.com/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {OPENAI_API}",
             "Content-Type": "application/json"
@@ -226,12 +230,29 @@ async def ask_chatgpt(question, user_id=None):
             # Без контекста
             messages.append({"role": "user", "content": question})
         
-        data = {
-            "model": OPENAI_MODEL,
-            "messages": messages,
-            "temperature": 0.8,
-            "max_tokens": 4000
-        }
+        if use_responses_api:
+            # Преобразуем messages в формат Responses API
+            responses_input = []
+            for m in messages:
+                role = m.get("role", "user")
+                content = m.get("content", "")
+                responses_input.append({
+                    "role": role,
+                    "content": [{"type": "text", "text": content}]
+                })
+            data = {
+                "model": OPENAI_MODEL,
+                "input": responses_input,
+                "temperature": 0.8,
+                "max_completion_tokens": 1000
+            }
+        else:
+            data = {
+                "model": OPENAI_MODEL,
+                "messages": messages,
+                "temperature": 0.8,
+                "max_tokens": 4000
+            }
         
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -241,11 +262,34 @@ async def ask_chatgpt(question, user_id=None):
                     return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
                 
                 result = await resp.json()
-                if "choices" not in result or not result["choices"]:
-                    logger.error(f"OpenAI API unexpected response: {result}")
-                    return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
-                
-                assistant_response = result["choices"][0]["message"]["content"].strip()
+                if use_responses_api:
+                    assistant_response = None
+                    if isinstance(result, dict):
+                        # Пытаемся взять агрегированный текст
+                        assistant_response = (result.get("output_text") or "").strip()
+                        if not assistant_response:
+                            # Пытаемся извлечь из output
+                            output = result.get("output") or []
+                            if output and isinstance(output, list):
+                                for item in output:
+                                    if item and isinstance(item, dict):
+                                        contents = item.get("content") or []
+                                        for c in contents:
+                                            if isinstance(c, dict):
+                                                text_val = c.get("text") or c.get("output_text")
+                                                if text_val:
+                                                    assistant_response = str(text_val).strip()
+                                                    break
+                                        if assistant_response:
+                                            break
+                    if not assistant_response:
+                        logger.error(f"OpenAI Responses API unexpected response: {result}")
+                        return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
+                else:
+                    if "choices" not in result or not result["choices"]:
+                        logger.error(f"OpenAI API unexpected response: {result}")
+                        return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
+                    assistant_response = result["choices"][0]["message"]["content"].strip()
                 
                 # Сохраняем ответ ассистента в контекст
                 if CONTEXT_ENABLED and user_id:
