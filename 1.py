@@ -240,7 +240,7 @@ async def ask_chatgpt(question, user_id=None):
                 content = m.get("content", "")
                 responses_input.append({
                     "role": role,
-                    "content": [{"type": "text", "text": content}]
+                    "content": [{"type": "input_text", "text": content}]
                 })
             data = {
                 "model": OPENAI_MODEL,
