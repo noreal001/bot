@@ -246,7 +246,7 @@ async def ask_chatgpt(question, user_id=None):
                 "model": OPENAI_MODEL,
                 "input": responses_input,
                 "temperature": 0.8,
-                "max_completion_tokens": 1000
+                "max_output_tokens": 1000
             }
         else:
             data = {
