@@ -251,7 +251,7 @@ async def ask_chatgpt(question, user_id=None):
             data = {
                 "model": OPENAI_MODEL,
                 "input": responses_input,
-                "max_output_tokens": 2048,
+                "max_output_tokens": 8192,
                 "reasoning": {"effort": "low"}
             }
             if system_instructions:
