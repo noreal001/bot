@@ -169,6 +169,7 @@ async def ask_chatgpt(question, user_id=None):
         use_responses_api = model_lower.startswith("gpt-5") or model_lower.startswith("gpt-4.1") or model_lower.startswith("gpt-4o")
 
         url = "https://api.openai.com/v1/responses" if use_responses_api else "https://api.openai.com/v1/chat/completions"
+        logger.info(f"OpenAI: using {'responses' if use_responses_api else 'chat/completions'} API with model={OPENAI_MODEL}")
         headers = {
             "Authorization": f"Bearer {OPENAI_API}",
             "Content-Type": "application/json"
@@ -274,6 +275,7 @@ async def ask_chatgpt(question, user_id=None):
                             "temperature": 0.8,
                             "max_tokens": 1000
                         }
+                        logger.info(f"OpenAI: fallback to chat/completions with model={OPENAI_FALLBACK_MODEL}")
                         async with session.post(fb_url, headers=headers, json=fb_data) as fb_resp:
                             if fb_resp.status != 200:
                                 logger.error(f"OpenAI API fallback error: {fb_resp.status} - {await fb_resp.text()}")
