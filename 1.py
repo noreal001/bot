@@ -40,6 +40,7 @@ BASE_WEBHOOK_URL = os.getenv('WEBHOOK_BASE_URL')
 WEBHOOK_PATH = "/webhook/ai-bear-123456"
 OPENAI_API = os.getenv('OPENAI_API_KEY')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5')
+OPENAI_FALLBACK_MODEL = os.getenv('OPENAI_FALLBACK_MODEL', 'gpt-4o-mini')
 
 # --- FastAPI app ---
 print('=== [LOG] FastAPI app создаётся ===')
@@ -258,38 +259,61 @@ async def ask_chatgpt(question, user_id=None):
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, headers=headers, json=data) as resp:
                 if resp.status != 200:
-                    logger.error(f"OpenAI API error: {resp.status} - {await resp.text()}")
-                    return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
-                
-                result = await resp.json()
-                if use_responses_api:
-                    assistant_response = None
-                    if isinstance(result, dict):
-                        # Пытаемся взять агрегированный текст
-                        assistant_response = (result.get("output_text") or "").strip()
-                        if not assistant_response:
-                            # Пытаемся извлечь из output
-                            output = result.get("output") or []
-                            if output and isinstance(output, list):
-                                for item in output:
-                                    if item and isinstance(item, dict):
-                                        contents = item.get("content") or []
-                                        for c in contents:
-                                            if isinstance(c, dict):
-                                                text_val = c.get("text") or c.get("output_text")
-                                                if text_val:
-                                                    assistant_response = str(text_val).strip()
-                                                    break
-                                        if assistant_response:
-                                            break
-                    if not assistant_response:
-                        logger.error(f"OpenAI Responses API unexpected response: {result}")
+                    # Фолбэк, если у ключа нет прав для Responses API
+                    try:
+                        error_text = await resp.text()
+                    except Exception:
+                        error_text = ""
+                    if use_responses_api and resp.status == 401 and "api.responses.write" in (error_text or ""):
+                        logger.warning("No permissions for Responses API (missing api.responses.write). Falling back to chat/completions with fallback model.")
+                        # Собираем фолбэк-запрос
+                        fb_url = "https://api.openai.com/v1/chat/completions"
+                        fb_data = {
+                            "model": OPENAI_FALLBACK_MODEL,
+                            "messages": messages,
+                            "temperature": 0.8,
+                            "max_tokens": 1000
+                        }
+                        async with session.post(fb_url, headers=headers, json=fb_data) as fb_resp:
+                            if fb_resp.status != 200:
+                                logger.error(f"OpenAI API fallback error: {fb_resp.status} - {await fb_resp.text()}")
+                                return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
+                            fb_result = await fb_resp.json()
+                            if "choices" not in fb_result or not fb_result["choices"]:
+                                logger.error(f"OpenAI API fallback unexpected response: {fb_result}")
+                                return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
+                            assistant_response = fb_result["choices"][0]["message"]["content"].strip()
+                    else:
+                        logger.error(f"OpenAI API error: {resp.status} - {error_text}")
                         return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
                 else:
-                    if "choices" not in result or not result["choices"]:
-                        logger.error(f"OpenAI API unexpected response: {result}")
-                        return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
-                    assistant_response = result["choices"][0]["message"]["content"].strip()
+                    result = await resp.json()
+                    if use_responses_api:
+                        assistant_response = None
+                        if isinstance(result, dict):
+                            assistant_response = (result.get("output_text") or "").strip()
+                            if not assistant_response:
+                                output = result.get("output") or []
+                                if output and isinstance(output, list):
+                                    for item in output:
+                                        if item and isinstance(item, dict):
+                                            contents = item.get("content") or []
+                                            for c in contents:
+                                                if isinstance(c, dict):
+                                                    text_val = c.get("text") or c.get("output_text")
+                                                    if text_val:
+                                                        assistant_response = str(text_val).strip()
+                                                        break
+                                            if assistant_response:
+                                                break
+                        if not assistant_response:
+                            logger.error(f"OpenAI Responses API unexpected response: {result}")
+                            return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
+                    else:
+                        if "choices" not in result or not result["choices"]:
+                            logger.error(f"OpenAI API unexpected response: {result}")
+                            return "Извините, произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
+                        assistant_response = result["choices"][0]["message"]["content"].strip()
                 
                 # Сохраняем ответ ассистента в контекст
                 if CONTEXT_ENABLED and user_id:
