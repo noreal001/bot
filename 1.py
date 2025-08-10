@@ -238,9 +238,11 @@ async def ask_chatgpt(question, user_id=None):
             for m in messages:
                 role = m.get("role", "user")
                 content = m.get("content", "")
+                # В Responses API: для assistant должен быть output_text, для user/system — input_text
+                content_type = "output_text" if role == "assistant" else "input_text"
                 responses_input.append({
                     "role": role,
-                    "content": [{"type": "input_text", "text": content}]
+                    "content": [{"type": content_type, "text": content}]
                 })
             data = {
                 "model": OPENAI_MODEL,
