@@ -235,10 +235,14 @@ async def ask_chatgpt(question, user_id=None):
         if use_responses_api:
             # Преобразуем messages в формат Responses API
             responses_input = []
+            system_instructions = None
             for m in messages:
                 role = m.get("role", "user")
                 content = m.get("content", "")
-                # В Responses API: для assistant должен быть output_text, для user/system — input_text
+                if role == "system":
+                    system_instructions = f"{system_instructions}\n\n{content}" if system_instructions else content
+                    continue
+                # В Responses API: для assistant должен быть output_text, для user — input_text
                 content_type = "output_text" if role == "assistant" else "input_text"
                 responses_input.append({
                     "role": role,
@@ -247,8 +251,11 @@ async def ask_chatgpt(question, user_id=None):
             data = {
                 "model": OPENAI_MODEL,
                 "input": responses_input,
-                "max_output_tokens": 1000
+                "max_output_tokens": 2048,
+                "reasoning": {"effort": "low"}
             }
+            if system_instructions:
+                data["instructions"] = system_instructions
         else:
             data = {
                 "model": OPENAI_MODEL,
